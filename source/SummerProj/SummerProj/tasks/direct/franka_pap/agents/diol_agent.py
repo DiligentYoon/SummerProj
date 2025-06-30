@@ -14,7 +14,7 @@ from skrl.models.torch import Model
 # DIOLAgent를 위한 기본 설정값
 DIOL_DEFAULT_CONFIG = {
     "discount_factor": 0.99,        # 감가율 (gamma)
-    "learning_rate": 1e-3,          # 학습률
+    "learning_rate": 1e-4,          # 학습률
     "batch_size": 64,               # 미니배치 크기
     "polyak": 0.005,                # 타겟 네트워크 소프트 업데이트 계수 (tau)
     "learning_starts": 1000,        # 학습 시작 전 최소 경험 수

@@ -79,7 +79,7 @@ class AISLDIOLRunner(Runner):
     def _generate_agent(self, env, cfg: Mapping[str, Any], models: Mapping[str, Any]) -> None:
         """
         DIOL/UOF HRL 프레임워크를 위해 고수준/저수준 에이전트를 각각 생성하고,
-        'self.high_level_agent'와 'self.low_level_agent'에 저장합니다.
+        'self.high_level_agent'와 'self.low_level_agent'에 저장
         """
         agents = {
             "high_level": None,
@@ -178,7 +178,10 @@ class AISLDIOLRunner(Runner):
         """
 
         if mode == "train":
-            pass
+            print("[AISLRunner] Starting HRL training...")
+            obs_dict, info = self._env.reset()
+            
+
         elif mode == "eval":
             pass
         else:
