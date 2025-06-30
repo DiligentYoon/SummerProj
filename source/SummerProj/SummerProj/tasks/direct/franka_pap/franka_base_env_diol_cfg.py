@@ -24,9 +24,8 @@ from isaaclab.controllers import DifferentialIKControllerCfg
 from isaaclab.controllers.joint_impedance import JointImpedanceControllerCfg
 
 
-
 @configclass
-class FrankaBaseEnvCfg(DirectDIOLCfg):
+class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
     # env
     episode_length_s: int
     decimation: int

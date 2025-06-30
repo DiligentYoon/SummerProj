@@ -1,0 +1,112 @@
+# Seed for random process
+seed: 42
+
+models:
+  high_level:
+    q_network:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaQNetwork
+      # FrankaQNetwork의 __init__에 전달할 파라미터들
+      features: [256, 128, 64]
+    target_q_network:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaQNetwork
+      features: [256, 128, 64]
+  
+  low_level:
+    separate: True
+    policy:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaDeterministicPolicy
+      # FrankaDeterministicPolicy의 __init__에 전달할 파라미터들
+      encoder_features: [256, 128]
+      policy_features: [64]
+      clip_actions: False
+    critic_1:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
+      encoder_features: [256, 128]
+      value_features: [64]
+    critic_2:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
+      encoder_features: [256, 128]
+      value_features: [64]
+    target_critic_1:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
+      encoder_features: [256, 128]
+      value_features: [64]
+    target_critic_2:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
+      encoder_features: [256, 128]
+      value_features: [64]
+
+
+# Rollout memory
+# https://skrl.readthedocs.io/en/latest/api/memories/random.html
+memory:
+  # 2-1. 고수준 에이전트를 위한 리플레이 버퍼
+  high_level:
+    class: RandomMemory # skrl의 표준 리플레이 버퍼 사용
+    memory_size: 100000
+
+  # 2-2. 저수준 에이전트를 위한 리플레이 버퍼
+  low_level:
+    class: RandomMemory # HER은 에이전트/러너 레벨에서 로직을 적용하므로 표준 메모리 사용
+    memory_size: 1000000
+
+
+runner:
+  # 고수준 정책의 이산 행동 개수 (Task-Specific Step의 총 개수)
+  high_level_num_actions: 10
+  # AAES 관련 설정
+  aaes:
+    ca_upper_bound: 0.2
+    csigma_upper_bound: 0.05
+    smoothing_factor: 0.05
+  # Abstract Demonstrations 관련 설정
+  demonstrations:
+    demo_ratio: 0.75
+
+
+# https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
+agent:
+  # 3-1. 고수준 에이전트 (커스텀 DIOL 에이전트)
+  high_level:
+    class: DIOL
+    discount_factor: 0.98 
+    learning_rate: 1.0e-3
+    batch_size: 256
+    polyak: 0.005
+
+  # 3-2. 저수준 에이전트 (skrl의 DDPG)
+  low_level:
+    class: DDPG
+    discount_factor: 0.98 # 감가율 (gamma)
+    batch_size: 1024
+    random_timesteps: 1000 # 초기 랜덤 탐험 스텝
+    learning_starts: 1000  # 학습 시작 전 최소 경험 수
+    polyak: 0.005
+    learning_rate_policy: 1.0e-4
+    learning_rate_critic: 1.0e-4 
+    # 초기 탐험을 위한 노이즈 설정 (AAES가 나중에 이 값을 덮어쓰거나 조절)
+    exploration:
+      noise: OrnsteinUhlenbeckNoise
+      noise_kwargs:
+        theta: 0.15
+        sigma: 0.1
+        base_scale: 0.5
+    # HER 관련 설정
+    her_kwargs:
+      k_ratio: 4 # 논문에서 제안한 k=4에 해당하는 값 (비율로 조절 가능)
+      strategy: "future"
+
+  # logging and checkpoint
+  experiment:
+    directory: "franka_approach"
+    experiment_name: ""
+    write_interval: auto
+    checkpoint_interval: auto
+
+
+# Trainer
+# https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
+trainer:
+  class: SequentialTrainer
+  timesteps: 32000
+  environment_info: log

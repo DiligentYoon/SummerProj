@@ -38,6 +38,10 @@ class DirectDIOL(DirectRLEnv):
         self.low_level_gols = torch.zeros((self.num_envs, self.cfg.goals.low_level_dim), dtype=torch.float, device=self.device)
         self.high_level_goals = torch.zeros((self.num_envs, self.cfg.goals.high_level_dim), dtype=torch.float, device=self.device)
 
+        # extras 딕셔너리에 HRL 관련 키들을 미리 초기화합니다.
+        self.extras["high_level_reward"] = torch.zeros(self.num_envs, device=self.device)
+        self.extras["option_terminated"] = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+
         print("[INFO] DirectDIOL: Hierarchical RL Environment Manger Initialized.")
 
 
@@ -68,7 +72,7 @@ class DirectDIOL(DirectRLEnv):
         self.single_observation_space["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.goals.low_level_dim,))
 
         # set up batched spaces
-        self.observation_space = gym.vector.utils.batch_space(self .single_observation_space, self.num_envs)
+        self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
         self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
 
         # optional state space for asymmetric actor-critic architectures

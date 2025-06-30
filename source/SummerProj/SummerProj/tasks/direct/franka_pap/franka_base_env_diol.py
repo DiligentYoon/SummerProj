@@ -1,3 +1,4 @@
+# franka_base_env_dilo.py
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # All rights reserved.
 #
@@ -19,12 +20,12 @@ from isaaclab.controllers import DifferentialIKController
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import sample_uniform
 
-from .franka_base_env_cfg import FrankaBaseEnvCfg
+from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
 
-class FrankaBaseEnv(DirectDIOL):
-    cfg: FrankaBaseEnvCfg
+class FrankaBaseDIOLEnv(DirectDIOL):
+    cfg: FrankaBaseDIOLEnvCfg
 
-    def __init__(self, cfg: FrankaBaseEnvCfg, render_mode: str | None = None, **kwargs):
+    def __init__(self, cfg: FrankaBaseDIOLEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
         # Total env ids

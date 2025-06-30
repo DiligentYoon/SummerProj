@@ -46,3 +46,11 @@ class DirectDIOLCfg(DirectRLEnvCfg):
 
     # Abstract Demonstrations settings
     demonstrations: DemonstrationsCfg = DemonstrationsCfg()
+
+    # Reward shaping settings
+    low_level_loc_threshold: float = 0.02
+    low_level_rot_threshold: float = 0.1
+
+    high_level_loc_threshold: float = 0.02
+    high_level_loc_rot_threshold: float = 0.1
+    

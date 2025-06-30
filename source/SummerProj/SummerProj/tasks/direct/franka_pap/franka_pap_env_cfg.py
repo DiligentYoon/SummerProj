@@ -13,11 +13,12 @@ from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.utils import configclass
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from .franka_base_env_cfg import FrankaBaseEnvCfg
+
+from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
 
 
 @configclass
-class FrankaPapEnvCfg(FrankaBaseEnvCfg):
+class FrankaPapEnvCfg(FrankaBaseDIOLEnvCfg):
     # env
     episode_length_s = 10.0
     decimation = 10

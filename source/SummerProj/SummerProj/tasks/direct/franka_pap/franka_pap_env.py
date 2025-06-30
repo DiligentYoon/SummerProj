@@ -12,13 +12,14 @@ from isaaclab.markers import VisualizationMarkers
 from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms, \
                                 combine_frame_transforms, quat_from_angle_axis, quat_mul, quat_inv, sample_uniform, saturate, \
                                 matrix_from_quat, quat_apply
-from .franka_base_env import FrankaBaseEnv
-from .franka_pap_env_cfg import FrankaPapEnvCfg
 
-class FrankaPapApproachEnv(FrankaBaseEnv):
+from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
+from .franka_base_env_diol import FrankaBaseDIOLEnv
+
+class FrankaPapApproachEnv(FrankaBaseDIOLEnv):
     """Franka Pap Approach Environment for the Franka Emika Panda robot."""
-    cfg: FrankaPapEnvCfg
-    def __init__(self, cfg: FrankaBaseEnv, render_mode: str | None = None, **kwargs):
+    cfg: FrankaBaseDIOLEnvCfg
+    def __init__(self, cfg: FrankaBaseDIOLEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
         # Controller Commands & Scene Entity
@@ -53,7 +54,7 @@ class FrankaPapApproachEnv(FrankaBaseEnv):
         self.noise_scale = torch.tensor(
                             [self.cfg.reset_position_noise_x, self.cfg.reset_position_noise_y],
                             device=self.device,)
-        
+
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
         self.via_marker = VisualizationMarkers(self.cfg.via_pos_marker_cfg)
@@ -150,14 +151,43 @@ class FrankaPapApproachEnv(FrankaBaseEnv):
     def _get_dones(self):
         self._compute_intermediate_values()
         truncated = self.episode_length_buf >= self.max_episode_length - 1
-        terminated = truncated.clone()
+        terminated = (self.extras["high_level_reward"] == 0.0)
+        option_terminated = (self.reward_buf == 0.0)
+        self.extras["option_terminated"] = option_terminated
+
         return terminated, truncated
         
         
     def _get_rewards(self):
-        reward = 1
 
-        return reward
+        # === 저 수준 (Low-Level)에 대한 보상 계산 ===
+        # To Do : 이후에 PBRS 기반으로 Reward Shaping을 적용할 예정
+        loc_to_subgoal = torch.norm(self.obs_buf["achieved_goal"][:, :3] - self.obs_buf["desired_goal"][:, :3], dim=1)
+        rot_to_subgoal = quat_error_magnitude(self.obs_buf["achieved_goal"][:, 3:7], self.obs_buf["desired_goal"][:, 3:7])
+
+        reward_low = torch.where(torch.logical_and(
+            loc_to_subgoal < self.cfg.low_level_loc_threshold,
+            rot_to_subgoal < self.cfg.low_level_rot_threshold,
+        ), 0.0, -1.0)
+
+        # === 고 수준 (High-Level)에 대한 보상 계산 ===
+        current_object_pos_w = self._object.data.root_state_w[:, :7]
+        target_block_pos_w = self.goal_pos_w[:, :7]
+
+        loc_to_final_goal = torch.norm(current_object_pos_w[:, :3] - target_block_pos_w[:, :3], dim=-1) # [N x M x 1]
+        rot_to_final_goal = quat_error_magnitude(current_object_pos_w[:, 3:7], target_block_pos_w[:, 3:7]) # [N x M x 1]
+
+        all_block_reached = torch.logical_and(
+            torch.all(loc_to_final_goal < self.cfg.high_level_loc_threshold, dim=-1),
+            torch.all(rot_to_final_goal < self.cfg.high_level_loc_rot_threshold, dim=-1)
+        )
+        reward_high = torch.where(all_block_reached, 0.0, -1.0)
+
+        # === 계산된 고 수준 보상 저장 : 환경 외부에서 처리 ===
+        self.extras["high_level_reward"] = reward_high
+
+        # === 계산된 저 수준 보상 리턴 : 환경 내부에서 처리 ===
+        return reward_low
     
 
     def _get_observations(self):
@@ -172,8 +202,9 @@ class FrankaPapApproachEnv(FrankaBaseEnv):
         object_loc_tcp, object_rot_tcp = subtract_frame_transforms(
         self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
         goal_pos_tcp = torch.cat([object_loc_tcp, object_rot_tcp], dim=1)
-
-        obs = torch.cat(
+        
+        # To Do : Low-Level Goal 기반으로 관측 구성해야 함 특히, goal_pos_b와 goal_pos_tcp를 수정해야 함
+        low_level_obs = torch.cat(
             (   
                 # robot joint pose (7 not 9)
                 joint_pos_scaled[:, 0:self.num_active_joints],
@@ -187,8 +218,15 @@ class FrankaPapApproachEnv(FrankaBaseEnv):
                 goal_pos_tcp
             ), dim=1
         )
+        achieved_goal = self.robot_grasp_pos_b[:, :7]
 
-        return {"policy": obs}
+        self.obs_buf.update({
+            "observation": low_level_obs,
+            "achieved_goal": achieved_goal,
+            "desired_goal": self.low_level_goals
+        })
+
+        return self.obs_buf
 
     
     def _reset_idx(self, env_ids: torch.Tensor):
@@ -204,7 +242,7 @@ class FrankaPapApproachEnv(FrankaBaseEnv):
         loc_noise_y = sample_uniform(-0.3, 0.3, (len(env_ids), 1), device=self.device)
         loc_noise_z = sample_uniform(0.3, 0.5, (len(env_ids), 1), device=self.device)
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
-        object_default_state = torch.zeros_like(self._robot.data.root_state_w[env_ids], device=self.device)
+        object_default_state = torch.zeros_like(self._object.data.root_state_w[env_ids], device=self.device)
         object_default_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
     
         # object(=target point) reset : Rotation
@@ -243,6 +281,7 @@ class FrankaPapApproachEnv(FrankaBaseEnv):
         self.robot_grasp_pos_w[env_ids, :3] = root_pos_w[:, :3] + quat_apply(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, :3])
         
         # ========= Position Error 업데이트 =========
+        # To Do : Position Error 계산을 추후엔 Low-Level Goal에 맞춰서 적용할 수 있도록 수정 예정
         # Location
         self.prev_loc_error[env_ids] = self.loc_error[env_ids]
         self.loc_error[env_ids] = torch.norm(

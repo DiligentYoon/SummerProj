@@ -13,12 +13,13 @@ from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms,
 from isaaclab.markers import VisualizationMarkers
 
 from .franka_base_env import FrankaBaseEnv
+from .franka_base_env_cfg import FrankaBaseEnvCfg
 from .franka_reach_env_cfg import FrankaReachEnvCfg
 
 class FrankaReachEnv(FrankaBaseEnv):
     """Franka Pap Approach Environment for the Franka Emika Panda robot."""
     cfg: FrankaReachEnvCfg
-    def __init__(self, cfg: FrankaBaseEnv, render_mode: str | None = None, **kwargs):
+    def __init__(self, cfg: FrankaBaseEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
         # Controller Commands & Scene Entity
