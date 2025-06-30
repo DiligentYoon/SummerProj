@@ -122,7 +122,7 @@ class AISLDIOLRunner(Runner):
             print("  - Instantiated high-level agent: DIOLAgent")
         
         else:
-            raise ValueError("Configuration for high-level agent is incomplete or missing. Please check 'agent.high_level', 'memory.high_level', and 'models.high_level' in the configuration.")
+            raise ValueError("Configuration for high-level agent is incomplete or missing. Please check 'high_level' flag in the configuration.")
 
         # --- 2. 저수준 에이전트 (DDPG) 생성 ---
         print("[AISLRunner] Instantiating low-level agent (DDPG Agent)...")
@@ -157,7 +157,7 @@ class AISLDIOLRunner(Runner):
             print("  - Instantiated low-level agent: DDPG")
         
         else:
-            raise ValueError("Configuration for low-level agent is incomplete or missing. Please check 'agent.low_level', 'memory.low_level', and 'models.low_level' in the configuration.")
+            raise ValueError("Configuration for low-level agent is incomplete or missing. Please check 'low_level' flag in the configuration.")
         
         agents["high_level"] = self.high_level_agent
         agents["low_level"] = self.low_level_agent
@@ -180,9 +180,10 @@ class AISLDIOLRunner(Runner):
         if mode == "train":
             print("[AISLRunner] Starting HRL training...")
             obs_dict, info = self._env.reset()
-            
+
 
         elif mode == "eval":
-            pass
+            print("[AISLRunner] Starting HRL evaluation...")
+            obs_dict, info = self._env.reset()
         else:
             raise ValueError(f"Unknown running mode: {mode}")
