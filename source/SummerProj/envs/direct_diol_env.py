@@ -1,0 +1,92 @@
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+from __future__ import annotations
+
+import builtins
+import omni.log
+from dataclasses import MISSING
+import gymnasium as gym
+import numpy as np
+import torch
+from abc import abstractmethod
+
+from isaaclab.utils.configclass import configclass
+from isaaclab.envs.direct_rl_env import DirectRLEnv
+from isaaclab.envs.utils.spaces import sample_space, spec_to_gym_space
+from .direct_diol_env_cfg import DirectDIOLCfg
+
+@configclass
+class DirectDIOL(DirectRLEnv):
+    """
+        DirectDIOL is a class that extends the DirectRLEnv class to provide hierarchical reinforcement learning capabilities.
+    """
+    cfg: DirectDIOLCfg
+    def __init__(self, cfg: DirectDIOLCfg, **kwargs):
+        """
+        Initialize the DirectDIOL environment with the given configuration.
+
+        Args:
+            cfg (DirectDIOLCfg): Configuration for the environment.
+            **kwargs: Additional keyword arguments.
+        """
+        super().__init__(cfg, **kwargs)
+
+        # HRL 관련 버퍼 초기화 (저 수준 목표 및 고 수준 최종 목표)
+        self.low_level_gols = torch.zeros((self.num_envs, self.cfg.goals.low_level_dim), dtype=torch.float, device=self.device)
+        self.high_level_goals = torch.zeros((self.num_envs, self.cfg.goals.high_level_dim), dtype=torch.float, device=self.device)
+
+        print("[INFO] DirectDIOL: Hierarchical RL Environment Manger Initialized.")
+
+
+    def _configure_gym_env_spaces(self):
+        """Configure the action and observation spaces for the Gym environment."""
+        # show deprecation message and overwrite configuration
+        if self.cfg.num_actions is not None:
+            omni.log.warn("DirectRLEnvCfg.num_actions is deprecated. Use DirectRLEnvCfg.action_space instead.")
+            if isinstance(self.cfg.action_space, type(MISSING)):
+                self.cfg.action_space = self.cfg.num_actions
+        if self.cfg.num_observations is not None:
+            omni.log.warn(
+                "DirectRLEnvCfg.num_observations is deprecated. Use DirectRLEnvCfg.observation_space instead."
+            )
+            if isinstance(self.cfg.observation_space, type(MISSING)):
+                self.cfg.observation_space = self.cfg.num_observations
+        if self.cfg.num_states is not None:
+            omni.log.warn("DirectRLEnvCfg.num_states is deprecated. Use DirectRLEnvCfg.state_space instead.")
+            if isinstance(self.cfg.state_space, type(MISSING)):
+                self.cfg.state_space = self.cfg.num_states
+
+
+        # set up spaces
+        self.single_action_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
+        self.single_observation_space = gym.spaces.Dict()
+        self.single_observation_space["observation"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,))
+        self.single_observation_space["achieved_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.goals.achieved_goal_dim,))
+        self.single_observation_space["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.goals.low_level_dim,))
+
+        # set up batched spaces
+        self.observation_space = gym.vector.utils.batch_space(self .single_observation_space, self.num_envs)
+        self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
+
+        # optional state space for asymmetric actor-critic architectures
+        self.state_space = None
+        if self.cfg.state_space:
+            self.single_observation_space["critic"] = spec_to_gym_space(self.cfg.state_space)
+            self.state_space = gym.vector.utils.batch_space(self.single_observation_space["critic"], self.num_envs)
+
+        # instantiate actions (needed for tasks for which the observations computation is dependent on the actions)
+        self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)
+
+
+    # ---- 새로운 Helper Methods ----
+    
+    def set_low_level_goals(self, goals: torch.Tensor):
+        """외부에서 저수준 목표(sub-goal)를 설정하기 위한 인터페이스"""
+        self.low_level_goals = goals.to(self.device)
+
+    def set_high_level_goals(self, goals: torch.Tensor):
+        """외부에서 에피소드의 최종 목표를 설정하기 위한 인터페이스"""
+        self.high_level_goals = goals.to(self.device)
