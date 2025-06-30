@@ -177,8 +177,6 @@ class AISLDIOLRunner(Runner):
         :raises ValueError: The specified running mode is not valid
         """
 
-
-
         if mode == "train":
             pass
         elif mode == "eval":

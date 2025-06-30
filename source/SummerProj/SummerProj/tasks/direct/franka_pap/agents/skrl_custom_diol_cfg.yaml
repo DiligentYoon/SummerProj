@@ -73,6 +73,8 @@ agent:
     learning_rate: 1.0e-3
     batch_size: 256
     polyak: 0.005
+    state_preprocessor: RunningStandardScaler
+    state_preprocessor_kwargs: null  # null로 두면 skrl/runner가 자동으로 채워줌
 
   # 3-2. 저수준 에이전트 (skrl의 DDPG)
   low_level:
@@ -83,7 +85,11 @@ agent:
     learning_starts: 1000  # 학습 시작 전 최소 경험 수
     polyak: 0.005
     learning_rate_policy: 1.0e-4
-    learning_rate_critic: 1.0e-4 
+    learning_rate_critic: 1.0e-4
+    state_preprocessor: RunningStandardScaler
+    state_preprocessor_kwargs: null
+    value_preprocessor: RunningStandardScaler
+    value_preprocessor_kwargs: null
     # 초기 탐험을 위한 노이즈 설정 (AAES가 나중에 이 값을 덮어쓰거나 조절)
     exploration:
       noise: OrnsteinUhlenbeckNoise
