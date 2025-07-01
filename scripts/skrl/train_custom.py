@@ -187,7 +187,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # ============= Custom Agent & Trainer 생성 ===============
     print("[INFO] Instantiating runner class via custom logic...")
     runner = AISLDIOLRunner(env, agent_cfg)
-    print("✅ [AISLRunner] Runner and its components instantiated successfully!")
+    print("✅ [INFO] Runner and its components instantiated successfully!")
 
     # Checkpoint 로드
     if resume_path:
