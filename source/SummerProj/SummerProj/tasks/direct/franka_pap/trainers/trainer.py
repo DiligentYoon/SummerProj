@@ -47,4 +47,15 @@ class HRLTrainer(Trainer):
         self.high_level_agent.init(trainer_cfg = self.cfg)
         self.low_level_agent.init(trainer_cfg = self.cfg)
         print("[HRLTrainer] Initialize agents...")
+    
+
+    # ========== HRL Train 및 Evaluation ===========
+    # Reference : 
+
+
+    def train(self):
+        return super().train()
+    
+    def eval(self):
+        return super().eval()
 
