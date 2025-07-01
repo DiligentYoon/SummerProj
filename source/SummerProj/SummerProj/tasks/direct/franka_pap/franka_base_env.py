@@ -10,7 +10,7 @@ import torch
 from abc import abstractmethod
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import Articulation, RigidObject, AssetBase
+from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.controllers.joint_impedance import JointImpedanceController

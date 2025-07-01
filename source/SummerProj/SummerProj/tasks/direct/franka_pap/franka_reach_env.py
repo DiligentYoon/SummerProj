@@ -19,7 +19,7 @@ from .franka_reach_env_cfg import FrankaReachEnvCfg
 class FrankaReachEnv(FrankaBaseEnv):
     """Franka Pap Approach Environment for the Franka Emika Panda robot."""
     cfg: FrankaReachEnvCfg
-    def __init__(self, cfg: FrankaBaseEnvCfg, render_mode: str | None = None, **kwargs):
+    def __init__(self, cfg: FrankaReachEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
         # Controller Commands & Scene Entity
