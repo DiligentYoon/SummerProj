@@ -1,19 +1,28 @@
-from typing import Any, Mapping
+import sys
+import os
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from typing import Any, Mapping, Dict
 import copy
 
-# hydra.utils.instantiate를 사용하기 위해 임포트
+import torch
 import hydra
 
 # skrl의 원래 Runner와 필요한 클래스들을 Import
-from skrl import logger
 import gymnasium as gym
 from skrl.utils.runner.torch import Runner
 from skrl.models.torch import Model
+from skrl.agents.torch import Agent
 
-from ....SummerProj.source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.diol_agent import DIOLAgent
+from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.diol_agent import DIOLAgent
+from source.SummerProj.SummerProj.tasks.direct.franka_pap.trainers.trainer import HRLTrainer
+
 
 class AISLDIOLRunner(Runner):
-    # 기존 SKRL에서 제공하는 Runner Class를 오버라이딩. Custom Model에 대한 처리만 따로 수행
+    # 기존 SKRL에서 제공하는 Runner Class를 오버라이딩. Customizing 요소에 대한 처리만 따로 수행
     def _generate_models(self, env, cfg: Mapping[str, Any]) -> Mapping[str, Mapping[str, Model]]:
         device = env.device
         models_cfg = copy.deepcopy(cfg.get("models", {}))
@@ -21,11 +30,11 @@ class AISLDIOLRunner(Runner):
 
         # ==== 각 Level에 맞는 Action/Observation Space 정의 ====
         # High-Level 정책(DIOL)을 위한 공간
-        high_level_observation_space = env.single_observation_space["observation"]
-        high_level_action_space = gym.spaces.Discrete(cfg.get("high_level_num_actions"))
+        high_level_observation_space = env.single_observation_space["policy"]["observation"]
+        high_level_action_space = gym.spaces.Discrete(cfg["runner"]["high_level_num_actions"])
 
         # Low-Level 정책(DDPG)을 위한 공간
-        low_level_observation_space = env.observation_space 
+        low_level_observation_space = env._unwrapped.observation_space 
         low_level_action_space = env.action_space
 
 
@@ -89,9 +98,10 @@ class AISLDIOLRunner(Runner):
         self.low_level_agent = None
         
         agent_cfg = copy.deepcopy(cfg.get("agent", {}))
+        agent_cfg.update(self._process_cfg(agent_cfg))
         memory_cfg = copy.deepcopy(cfg.get("memory", {}))
         
-        # --- 1. 고수준 에이전트 (DIOLAgent) 생성 ---
+        # --- High-Level 에이전트 (DIOLAgent) 생성 ---
         print("[AISLRunner] Instantiating high-level agent (DIOLAgent)...")
         agent_cfg_high = agent_cfg.get("high_level", {})
         memory_cfg_high = memory_cfg.get("high_level", {})
@@ -99,7 +109,7 @@ class AISLDIOLRunner(Runner):
 
         if agent_cfg_high and memory_cfg_high and models_high:
             # DIOLAgent를 위한 공간 정보 정의
-            observation_space_high = env.single_observation_space["observation"]
+            observation_space_high = env.single_observation_space["policy"]["observation"]
             action_space_high = gym.spaces.Discrete(cfg["runner"]["high_level_num_actions"])
             
             # 고수준 메모리(리플레이 버퍼) 생성
@@ -109,8 +119,10 @@ class AISLDIOLRunner(Runner):
                                        device=env.device)
             
             # Preprocessor 설정
-            agent_cfg_high.get("state_preprocessor_kwargs", {}).update(
-            {"size": observation_space_high, "device": self.device})
+            if agent_cfg_high.get("state_preprocessor_kwargs") is None:
+                agent_cfg_high["state_preprocessor_kwargs"] = {}
+            agent_cfg_high["state_preprocessor_kwargs"].update(
+            {"size": observation_space_high, "device": env.device})
 
             # 커스텀 DIOLAgent 클래스 인스턴스화
             self.high_level_agent = DIOLAgent(models=models_high,
@@ -124,7 +136,8 @@ class AISLDIOLRunner(Runner):
         else:
             raise ValueError("Configuration for high-level agent is incomplete or missing. Please check 'high_level' flag in the configuration.")
 
-        # --- 2. 저수준 에이전트 (DDPG) 생성 ---
+
+        # --- Low-Level 에이전트 생성 ---
         print("[AISLRunner] Instantiating low-level agent (DDPG Agent)...")
         agent_cfg_low = agent_cfg.get("low_level", {})
         memory_cfg_low = memory_cfg.get("low_level", {})
@@ -132,7 +145,7 @@ class AISLDIOLRunner(Runner):
 
         if agent_cfg_low and memory_cfg_low and models_low:
             # 저수준 DDPG 에이전트는 skrl의 표준 클래스를 사용
-            ddpg_agent_class = self._component(agent_cfg_low.get("class"))
+            agent_class = self._component(agent_cfg_low.get("class"))
             
             # 저수준 메모리(리플레이 버퍼) 생성
             memory_class = self._component(memory_cfg_low.get("class", "RandomMemory"))
@@ -141,18 +154,25 @@ class AISLDIOLRunner(Runner):
                                       device=env.device)
             
             # preprocessor 설정
-            agent_cfg_low.get("state_preprocessor_kwargs", {}).update(
-                {"size": env.observation_space, "device": self.device})
-            agent_cfg_low.get("value_preprocessor_kwargs", {}).update(
-                {"size": 1, "device": self.device})
+            if agent_cfg_low.get("state_preprocessor_kwargs") is None:
+                agent_cfg_low["state_preprocessor_kwargs"] = {}
+            if agent_cfg_low.get("value_preprocessor_kwargs") is None:
+                agent_cfg_low["value_preprocessor_kwargs"] = {}
+
+
+            agent_cfg_low["state_preprocessor_kwargs"].update(
+                {"size": env._unwrapped.observation_space, "device": env.device})
+            agent_cfg_low["value_preprocessor_kwargs"].update(
+                {"size": 1, "device": env.device}
+            )
 
             # skrl의 DDPG 에이전트 인스턴스화
-            self.low_level_agent = ddpg_agent_class(models=models_low,
-                                                    memory=memory_low,
-                                                    observation_space=env.observation_space,
-                                                    action_space=env.action_space,
-                                                    device=env.device,
-                                                    cfg=agent_cfg_low)
+            self.low_level_agent = agent_class(models=models_low,
+                                                memory=memory_low,
+                                                observation_space=env._unwrapped.observation_space,
+                                                action_space=env.action_space,
+                                                device=env.device,
+                                                cfg=agent_cfg_low)
             
             print("  - Instantiated low-level agent: DDPG")
         
@@ -165,25 +185,47 @@ class AISLDIOLRunner(Runner):
         return agents
     
     
-    def _generate_trainer(self, env, cfg, agent):
-        return self
-    
-
-    def run(self, mode: str = "train") -> None:
-        """Run the training/evaluation
-
-        :param mode: Running mode: ``"train"`` for training or ``"eval"`` for evaluation (default: ``"train"``)
-
-        :raises ValueError: The specified running mode is not valid
+    def _generate_trainer(self, env, cfg:Mapping[str, Any], agents: Dict[str, Agent]) -> HRLTrainer:
         """
+            Generate a custom HRL trainer instance for the AISL DIOL framework.
+            
+            Args:
+                env (Wrapper): 학습에 사용될 환경.
+                cfg (Mapping[str, Any]): 전체 설정 딕셔너리.
+                agents (Dict[str, Agent]): _generate_agent에서 반환한 
+                                        {"high_level": ..., "low_level": ...} 형태의 딕셔너리.
 
-        if mode == "train":
-            print("[AISLRunner] Starting HRL training...")
-            obs_dict, info = self._env.reset()
+            Returns:
+                HRLTrainer: 인스턴스화된 커스텀 HRL 트레이너 객체.
+        """
+        print("[AISLRunner] Instantiating custom HRLTrainer...")
+        trainer_cfg = cfg.get("trainer", {})
 
-
-        elif mode == "eval":
-            print("[AISLRunner] Starting HRL evaluation...")
-            obs_dict, info = self._env.reset()
+        # Hydra의 _target_기능 사용하여 커스텀 HRLTrainer 인스턴스화
+        if "_target_" in trainer_cfg:
+            # HRLTrainer의 __init__에 필요한 모든 인자를 전달합니다.
+            return hydra.utils.instantiate(config=trainer_cfg, env=env, agents=agents)
+        
+        # 또는 skrl의 기본 방식을 따를 경우 (class 키 사용): 이 경우에는 SequentialTrainer와 같이 SKRL에서 구현된 Trainer사용하는 경우에만 사용
         else:
-            raise ValueError(f"Unknown running mode: {mode}")
+            try:
+                # yaml 파일에서 trainer 클래스 경로를 가져옵니다.
+                trainer_class_str = trainer_cfg["class"]
+                del trainer_cfg["class"]
+                trainer_class = self._component(trainer_class_str)
+            except KeyError:
+                # _target_이나 class 키가 없으면 에러를 발생시킵니다.
+                raise ValueError("A 'class' or '_target_' must be defined for the trainer in the configuration.")
+            
+            # HRLTrainer에 환경과 두 에이전트를 모두 전달하여 생성합니다.
+            return trainer_class(env=env, agents=agents, cfg=trainer_cfg)
+        
+    
+    # ============== 보조 함수 ===============
+    def _recompute_reward(self, achieved_goal, desired_goal):
+        """
+            Compute the reward based on the achieved goal for the HER strategy.
+        """
+        dist = torch.norm(achieved_goal - desired_goal, dim=-1)
+
+        return torch.where(dist < self.her_cfg["low_threshold"], 0.0, -1.0)

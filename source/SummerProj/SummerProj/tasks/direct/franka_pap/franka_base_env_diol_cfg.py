@@ -6,11 +6,11 @@
 from __future__ import annotations
 from dataclasses import MISSING
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
-
 import isaaclab.sim as sim_utils
 import isaaclab.envs.mdp as mdp
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from SummerProj.envs.direct_diol_env_cfg import DirectDIOLCfg
+
+from source.SummerProj.envs.direct_diol_env_cfg import DirectDIOLCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.scene import InteractiveSceneCfg
@@ -147,3 +147,4 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
     # target point reset
     reset_position_noise_x = 0.1
     reset_position_noise_y = 0.2
+    

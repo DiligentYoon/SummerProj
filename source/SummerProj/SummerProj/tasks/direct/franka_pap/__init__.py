@@ -13,13 +13,13 @@ from . import agents
 
 gym.register(
     id="Franka-PickandPlace-Direct-v0",
-    entry_point=f"{__name__}.franka_pap_approach_env:FrankaPapApproachEnv",
+    entry_point=f"{__name__}.franka_pap_env:FrankaPapEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.franka_pap_approach_env_cfg:FrankaPapApproachEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.franka_pap_env_cfg:FrankaPapEnvCfg",
         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
-        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_custom_diol_cfg.yaml",
         "sb3_cfg_entry_point": f"{agents.__name__}:sb3_ppo_cfg.yaml",
     },
 )

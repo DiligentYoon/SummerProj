@@ -23,8 +23,8 @@ parser = argparse.ArgumentParser(description="Train an RL agent with skrl.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default="Franka-Reach-Direct-v0", help="Name of the task.")
+parser.add_argument("--num_envs", type=int, default=2, help="Number of environments to simulate.")
+parser.add_argument("--task", type=str, default="Franka-PickandPlace-Direct-v0", help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
@@ -102,7 +102,8 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import SummerProj.tasks  # noqa: F401
-from runner import AISLRunner
+# from runner import AISLRunner
+from runner_diol import AISLDIOLRunner
 
 
 # config shortcuts
@@ -184,8 +185,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
 
     # ============= Custom Agent & Trainer 생성 ===============
-    print("[INFO] Instantiating trainer and agent via custom factory...")
-    runner = AISLRunner(env, agent_cfg)
+    print("[INFO] Instantiating runner class via custom logic...")
+    runner = AISLDIOLRunner(env, agent_cfg)
+    print("✅ [AISLRunner] Runner and its components instantiated successfully!")
 
     # Checkpoint 로드
     if resume_path:

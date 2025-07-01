@@ -79,8 +79,8 @@ agent:
   # 3-2. 저수준 에이전트 (skrl의 DDPG)
   low_level:
     class: DDPG
-    discount_factor: 0.98 # 감가율 (gamma)
-    batch_size: 1024
+    discount_factor: 0.99 # 감가율 (gamma)
+    batch_size: 64
     random_timesteps: 1000 # 초기 랜덤 탐험 스텝
     learning_starts: 1000  # 학습 시작 전 최소 경험 수
     polyak: 0.005
@@ -92,27 +92,34 @@ agent:
     value_preprocessor_kwargs: null
     # 초기 탐험을 위한 노이즈 설정 (AAES가 나중에 이 값을 덮어쓰거나 조절)
     exploration:
+      initial_scale: 1.0
+      final_scale: 1e-3
+      timesteps: 100000
       noise: OrnsteinUhlenbeckNoise
       noise_kwargs:
         theta: 0.15
         sigma: 0.1
         base_scale: 0.5
-    # HER 관련 설정
-    her_kwargs:
-      k_ratio: 4 # 논문에서 제안한 k=4에 해당하는 값 (비율로 조절 가능)
-      strategy: "future"
-
   # logging and checkpoint
   experiment:
-    directory: "franka_approach"
+    directory: "franka_pap"
     experiment_name: ""
     write_interval: auto
     checkpoint_interval: auto
 
+# HER 관련 설정
+her_kwargs:
+  k_ratio: 4 # 논문에서 제안한 k=4에 해당하는 값 (비율로 조절 가능)
+  strategy: "future"
+  low_threshold: 0.05
+  high_threshold: 0.1
+
 
 # Trainer
-# https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
+# https://skrl.readthedocs.io/en/latest/api/trainers/
 trainer:
-  class: SequentialTrainer
-  timesteps: 32000
-  environment_info: log
+  _target_: SummerProj.tasks.direct.franka_pap.trainers.trainer.HRLTrainer
+  timesteps: 100000
+  epoch_interval: 1
+  cycle_interval: 50
+  episode_interval: 16

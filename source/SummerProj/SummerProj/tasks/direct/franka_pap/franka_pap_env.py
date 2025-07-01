@@ -16,11 +16,20 @@ from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms,
 from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
 from .franka_base_env_diol import FrankaBaseDIOLEnv
 
-class FrankaPapApproachEnv(FrankaBaseDIOLEnv):
+class FrankaPapEnv(FrankaBaseDIOLEnv):
     """Franka Pap Approach Environment for the Franka Emika Panda robot."""
     cfg: FrankaBaseDIOLEnvCfg
     def __init__(self, cfg: FrankaBaseDIOLEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
+
+        # Observation Buffer
+        self.obs_buf = {
+            "policy": {
+                "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
+                "achieved_goal": torch.zeros((self.num_envs, self.cfg.goals.achieved_goal_dim), device=self.device),
+                "desired_goal": torch.zeros((self.num_envs, self.cfg.goals.achieved_goal_dim), device=self.device)
+            }
+        }
 
         # Controller Commands & Scene Entity
         self._robot_entity = self.cfg.robot_entity
@@ -57,7 +66,7 @@ class FrankaPapApproachEnv(FrankaBaseDIOLEnv):
 
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
-        self.via_marker = VisualizationMarkers(self.cfg.via_pos_marker_cfg)
+        # self.via_marker = VisualizationMarkers(self.cfg.via_pos_marker_cfg)
 
 
     def _setup_scene(self):
@@ -162,8 +171,10 @@ class FrankaPapApproachEnv(FrankaBaseDIOLEnv):
 
         # === 저 수준 (Low-Level)에 대한 보상 계산 ===
         # To Do : 이후에 PBRS 기반으로 Reward Shaping을 적용할 예정
-        loc_to_subgoal = torch.norm(self.obs_buf["achieved_goal"][:, :3] - self.obs_buf["desired_goal"][:, :3], dim=1)
-        rot_to_subgoal = quat_error_magnitude(self.obs_buf["achieved_goal"][:, 3:7], self.obs_buf["desired_goal"][:, 3:7])
+        loc_to_subgoal = torch.norm(self.obs_buf["policy"]["achieved_goal"][:, :3] - \
+                                    self.obs_buf["policy"]["desired_goal"][:, :3], dim=1)
+        rot_to_subgoal = quat_error_magnitude(self.obs_buf["policy"]["achieved_goal"][:, 3:7], 
+                                              self.obs_buf["policy"]["desired_goal"][:, 3:7])
 
         reward_low = torch.where(torch.logical_and(
             loc_to_subgoal < self.cfg.low_level_loc_threshold,
@@ -219,12 +230,14 @@ class FrankaPapApproachEnv(FrankaBaseDIOLEnv):
             ), dim=1
         )
         achieved_goal = self.robot_grasp_pos_b[:, :7]
-
-        self.obs_buf.update({
+        
+        obs_buf = {
             "observation": low_level_obs,
             "achieved_goal": achieved_goal,
             "desired_goal": self.low_level_goals
-        })
+        }
+
+        self.obs_buf["policy"] = obs_buf
 
         return self.obs_buf
 
@@ -291,7 +304,7 @@ class FrankaPapApproachEnv(FrankaBaseDIOLEnv):
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], self.goal_pos_b[env_ids, 3:7])
         
         # ======== Visualization ==========
-        self.via_marker.visualize(self.processed_actions[:, :3] + self.robot_grasp_pos_w[:, :3])
+        # self.via_marker.visualize(self.processed_actions[:, :3] + self.robot_grasp_pos_w[:, :3])
         self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
         self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
     

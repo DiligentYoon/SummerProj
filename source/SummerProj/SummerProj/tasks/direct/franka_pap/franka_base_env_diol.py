@@ -13,7 +13,7 @@ from abc import abstractmethod
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
-from SummerProj.envs.direct_diol_env import DirectDIOL
+from source.SummerProj.envs.direct_diol_env import DirectDIOL
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.controllers.joint_impedance import JointImpedanceController
 from isaaclab.controllers import DifferentialIKController

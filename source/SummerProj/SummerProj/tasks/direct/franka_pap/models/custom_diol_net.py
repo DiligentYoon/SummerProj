@@ -15,8 +15,8 @@ class FrankaDeterministicPolicy(DeterministicMixin, Model):
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions, device)
 
-        obs_dim = observation_space["observation"].shape[0]
-        goal_dim = observation_space["desired_goal"].shape[0]
+        obs_dim = observation_space["policy"]["observation"].shape[0]
+        goal_dim = observation_space["policy"]["desired_goal"].shape[0]
         in_features = obs_dim + goal_dim
         
         # Backbone
@@ -39,8 +39,8 @@ class FrankaDeterministicPolicy(DeterministicMixin, Model):
         self.action_head = nn.Linear(in_features_policy, self.num_actions)
 
     def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
-        obs = inputs["states"]["observation"]
-        goal = inputs["states"]["desired_goal"]
+        obs = inputs["states"]["policy"]["observation"]
+        goal = inputs["states"]["policy"]["desired_goal"]
         x = self.encoder(torch.cat((obs, goal), dim=-1))
         p = self.policy_branch(x)
         
@@ -57,8 +57,8 @@ class FrankaValue(Model):
         Model.__init__(self, observation_space, action_space, device)
         
 
-        obs_dim = observation_space["observation"].shape[0]
-        goal_dim = observation_space["desired_goal"].shape[0]
+        obs_dim = observation_space["policy"]["observation"].shape[0]
+        goal_dim = observation_space["policy"]["desired_goal"].shape[0]
         action_dim = action_space.shape[0]
 
         # Backbone
@@ -81,8 +81,8 @@ class FrankaValue(Model):
         self.value_head = nn.Linear(in_features_value, 1)
 
     def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
-        obs = inputs["states"]["observation"]
-        goal = inputs["states"]["desired_goal"]
+        obs = inputs["states"]["policy"]["observation"]
+        goal = inputs["states"]["policy"]["desired_goal"]
         actions = inputs["taken_actions"]
         x = self.encoder(torch.cat((obs, goal), dim=-1))
         v = self.value_branch(torch.cat((x, actions), dim=-1))

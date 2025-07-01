@@ -13,18 +13,15 @@ import numpy as np
 import torch
 from abc import abstractmethod
 
-from isaaclab.utils.configclass import configclass
 from isaaclab.envs.direct_rl_env import DirectRLEnv
 from isaaclab.envs.utils.spaces import sample_space, spec_to_gym_space
 from .direct_diol_env_cfg import DirectDIOLCfg
 
-@configclass
 class DirectDIOL(DirectRLEnv):
     """
         DirectDIOL is a class that extends the DirectRLEnv class to provide hierarchical reinforcement learning capabilities.
     """
-    cfg: DirectDIOLCfg
-    def __init__(self, cfg: DirectDIOLCfg, **kwargs):
+    def __init__(self, cfg: DirectDIOLCfg, render_mode: str | None = None, **kwargs):
         """
         Initialize the DirectDIOL environment with the given configuration.
 
@@ -32,10 +29,11 @@ class DirectDIOL(DirectRLEnv):
             cfg (DirectDIOLCfg): Configuration for the environment.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__(cfg, **kwargs)
+        super().__init__(cfg, render_mode, **kwargs)
 
         # HRL 관련 버퍼 초기화 (저 수준 목표 및 고 수준 최종 목표)
-        self.low_level_gols = torch.zeros((self.num_envs, self.cfg.goals.low_level_dim), dtype=torch.float, device=self.device)
+        self.reward_buf = -1.0 * torch.ones(self.num_envs, dtype=torch.float, device=self.device)
+        self.low_level_goals = torch.zeros((self.num_envs, self.cfg.goals.low_level_dim), dtype=torch.float, device=self.device)
         self.high_level_goals = torch.zeros((self.num_envs, self.cfg.goals.high_level_dim), dtype=torch.float, device=self.device)
 
         # extras 딕셔너리에 HRL 관련 키들을 미리 초기화합니다.
@@ -70,6 +68,9 @@ class DirectDIOL(DirectRLEnv):
         self.single_observation_space["observation"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,))
         self.single_observation_space["achieved_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.goals.achieved_goal_dim,))
         self.single_observation_space["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.goals.low_level_dim,))
+        self.single_observation_space = gym.spaces.Dict({
+            "policy": self.single_observation_space
+        })
 
         # set up batched spaces
         self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
@@ -84,6 +85,10 @@ class DirectDIOL(DirectRLEnv):
         # instantiate actions (needed for tasks for which the observations computation is dependent on the actions)
         self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)
 
+
+    def _reset_idx(self, env_ids):
+        super()._reset_idx(env_ids)
+        self.reward_buf[env_ids] = -1.0
 
     # ---- 새로운 Helper Methods ----
     
