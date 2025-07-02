@@ -21,6 +21,7 @@ class DirectDIOL(DirectRLEnv):
     """
         DirectDIOL is a class that extends the DirectRLEnv class to provide hierarchical reinforcement learning capabilities.
     """
+    cfg: DirectDIOLCfg
     def __init__(self, cfg: DirectDIOLCfg, render_mode: str | None = None, **kwargs):
         """
         Initialize the DirectDIOL environment with the given configuration.
@@ -35,6 +36,7 @@ class DirectDIOL(DirectRLEnv):
         self.reward_buf = -1.0 * torch.ones(self.num_envs, dtype=torch.float, device=self.device)
         self.low_level_goals = torch.zeros((self.num_envs, self.cfg.goals.low_level_dim), dtype=torch.float, device=self.device)
         self.high_level_goals = torch.zeros((self.num_envs, self.cfg.goals.high_level_dim), dtype=torch.float, device=self.device)
+        self.achieved_goals = torch.zeros((self.num_envs, self.cfg.goals.achieved_goal_dim), dtype=torch.float, device=self.device)
 
         # extras 딕셔너리에 HRL 관련 키들을 미리 초기화합니다.
         self.extras["high_level_reward"] = torch.zeros(self.num_envs, device=self.device)
@@ -61,7 +63,7 @@ class DirectDIOL(DirectRLEnv):
             if isinstance(self.cfg.state_space, type(MISSING)):
                 self.cfg.state_space = self.cfg.num_states
 
-
+        # ============== Low-Level spaces ===============
         # set up spaces
         self.single_action_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
         self.single_observation_space = gym.spaces.Dict()
@@ -86,16 +88,14 @@ class DirectDIOL(DirectRLEnv):
         self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)
 
 
-    def _reset_idx(self, env_ids):
+    def _reset_idx(self, env_ids) -> None:
         super()._reset_idx(env_ids)
         self.reward_buf[env_ids] = -1.0
-
-    # ---- 새로운 Helper Methods ----
     
-    def set_low_level_goals(self, goals: torch.Tensor):
-        """외부에서 저수준 목표(sub-goal)를 설정하기 위한 인터페이스"""
-        self.low_level_goals = goals.to(self.device)
+    
+    def set_high_level_goal(self, high_level_goal: torch.Tensor) -> None:
+        self.high_level_goals[:, :] = high_level_goal
 
-    def set_high_level_goals(self, goals: torch.Tensor):
-        """외부에서 에피소드의 최종 목표를 설정하기 위한 인터페이스"""
-        self.high_level_goals = goals.to(self.device)
+    
+    def set_low_level_goal(self, low_level_goal: torch.Tensor) -> None:
+        self.low_level_goals[:, :] = low_level_goal

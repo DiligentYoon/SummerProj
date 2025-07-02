@@ -48,20 +48,7 @@ memory:
   # 2-2. 저수준 에이전트를 위한 리플레이 버퍼
   low_level:
     class: RandomMemory # HER은 에이전트/러너 레벨에서 로직을 적용하므로 표준 메모리 사용
-    memory_size: 1000000
-
-
-runner:
-  # 고수준 정책의 이산 행동 개수 (Task-Specific Step의 총 개수)
-  high_level_num_actions: 10
-  # AAES 관련 설정
-  aaes:
-    ca_upper_bound: 0.2
-    csigma_upper_bound: 0.05
-    smoothing_factor: 0.05
-  # Abstract Demonstrations 관련 설정
-  demonstrations:
-    demo_ratio: 0.75
+    memory_size: 100000
 
 
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
@@ -107,19 +94,26 @@ agent:
     write_interval: auto
     checkpoint_interval: auto
 
-# HER 관련 설정
-her_kwargs:
-  k_ratio: 4 # 논문에서 제안한 k=4에 해당하는 값 (비율로 조절 가능)
-  strategy: "future"
-  low_threshold: 0.05
-  high_threshold: 0.1
-
 
 # Trainer
 # https://skrl.readthedocs.io/en/latest/api/trainers/
 trainer:
   _target_: SummerProj.tasks.direct.franka_pap.trainers.trainer.HRLTrainer
   timesteps: 100000
+  episode_buffer_length: 1000
   epoch_interval: 1
   cycle_interval: 50
   episode_interval: 16
+  high_level_goal_dim: 10
+  low_level_goal_dim: 7
+  achieved_goal_dim: 7
+  ca_upper_bound: 0.2
+  csigma_upper_bound: 0.05
+  smoothing_factor: 0.05
+  demo_ratio: 0.6
+  # HER 관련 설정
+  her_kwargs:
+    k_ratio: 4 # 논문에서 제안한 k=4에 해당하는 값 (비율로 조절 가능)
+    strategy: "future"
+    low_threshold: 0.05
+    high_threshold: 0.1

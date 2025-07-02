@@ -9,7 +9,7 @@ class GoalsCfg:
     # 저수준 목표(g^L)의 차원.
     low_level_dim: int = 7
     # 고수준 목표(g^H)의 차원.
-    high_level_dim: int = 7
+    high_level_dim: int = 10
     # 달성된 목표(achieved_goal)의 차원. 
     achieved_goal_dim: int = 7
 

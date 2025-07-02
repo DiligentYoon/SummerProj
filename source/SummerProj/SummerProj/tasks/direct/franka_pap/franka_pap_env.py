@@ -63,7 +63,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self.noise_scale = torch.tensor(
                             [self.cfg.reset_position_noise_x, self.cfg.reset_position_noise_y],
                             device=self.device,)
-
+        
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
         # self.via_marker = VisualizationMarkers(self.cfg.via_pos_marker_cfg)
@@ -332,7 +332,16 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         jacobian_b[:, 3:, :] = torch.bmm(matrix_from_quat(self.tcp_offset_hand[:, 3:7]), jacobian_b[:, 3:, :])
 
         return jacobian_b
+    
 
+
+    def set_low_level_goals(self, goals: torch.Tensor):
+        """저수준 목표(sub-goal)를 설정하기 위한 인터페이스"""
+        self.low_level_goals = goals.to(self.device)
+
+    def set_high_level_goals(self, goals: torch.Tensor):
+        """에피소드의 최종 목표를 설정하기 위한 인터페이스"""
+        self.high_level_goals = goals.to(self.device)
 
 
 

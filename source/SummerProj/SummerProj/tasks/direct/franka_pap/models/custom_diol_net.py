@@ -96,8 +96,10 @@ class FrankaQNetwork(Model):
         
         Model.__init__(self, observation_space, action_space, device)
 
-        in_features = observation_space.shape[0]
-        num_actions = action_space.n
+        obs_dim = observation_space["observation"].shape[0]
+        goal_dim = observation_space["desired_goal"].shape[0]
+        in_features = obs_dim + goal_dim
+        num_actions = action_space.nvec[0]
 
         # MLP 네트워크
         layers = []
@@ -110,7 +112,8 @@ class FrankaQNetwork(Model):
         self.net = nn.Sequential(*layers)
     
     def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
-        # DIOL 에이전트의 관측은 'states' 키에 물리적 상태 정보만 담고 있을 것으로 예상
-        states = inputs["states"]
+        # DIOL 에이전트의 관측: Dict 타입에서 추출
+        states = inputs["states"]["observation"]
+        goals = inputs["states"]["desired_goal"]
         # 네트워크를 통과시켜 모든 행동에 대한 Q-value들을 반환합니다.
-        return self.net(states), {}
+        return self.net(torch.cat((states, goals), dim=1)), {}
