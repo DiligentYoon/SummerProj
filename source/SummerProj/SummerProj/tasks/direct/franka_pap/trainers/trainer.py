@@ -8,6 +8,7 @@ import sys
 from skrl.agents.torch import Agent
 from skrl.envs.wrappers.torch import Wrapper
 from skrl.trainers.torch import Trainer
+from isaaclab.utils.math import quat_error_magnitude
 
 HRL_TRAINER_DEFAULT_CONFIG = {
     "timesteps": 100000,          # 총 학습 타임스텝
@@ -62,7 +63,7 @@ class HRLTrainer(Trainer):
         # HER을 구현하기 위한 에피소드 버퍼
         low_level_obs_space = self.low_level_agent.observation_space
         low_level_action_space = self.low_level_agent.action_space
-        self.max_episode_buffer_length = self.cfg["episode_buffer_length"]
+        self.max_episode_buffer_length = env.max_episode_lengths
 
         states_buffer = {}
         next_states_buffer = {}
@@ -135,7 +136,7 @@ class HRLTrainer(Trainer):
 
             # ====== Low-Level action with AAES Logic ======
             low_level_action = self.low_level_agent.act(obs, timestep=timestep, timesteps=self.timesteps)[0]
-            action_to_env = self._apply_AAES(low_level_action)
+            action_to_env = self._apply_aaes(low_level_action)
 
             # Environment step
             next_obs, reward, terminated, truncated, info = self.env.step(action_to_env)
@@ -158,10 +159,6 @@ class HRLTrainer(Trainer):
                                                timestep,
                                                self.timesteps)
 
-            # Update Observation
-            obs = next_obs_dict
-
-
             is_option_done = info.get("option_terminated", torch.zeros_like(terminated)).any()
             is_episode_done = terminated.any() or truncated.any()
             if is_option_done or is_episode_done:               
@@ -175,14 +172,14 @@ class HRLTrainer(Trainer):
                 self.needs_new_high_level_action = True
 
             # ===== 주기적인 학습 및 평가 =====
-            # [사이클 종료] 일정 수의 에피소드가 끝나면(Cycle), 두 에이전트 모두 학습
+            # [Cycle 종료] 일정 수의 에피소드가 끝나면(Cycle), 두 에이전트 모두 학습
             if self.episode_counter > 0 and self.episode_counter % self.cfg["episode_interval"] == 0:
                 self.cycle_counter += 1
                 self.high_level_agent.train()
                 self.low_level_agent.train()
                 self.episode_counter = 0 # 사이클 내 에피소드 카운터 리셋
             
-            # [에포크 종료] 일정 수의 사이클이 끝나면(Epoch), 성능 평가 및 AAES 업데이트
+            # [Epoch 종료] 일정 수의 사이클이 끝나면, 성능 평가 및 AAES 업데이트
             if self.cycle_counter > 0 and self.cycle_counter % self.cfg["cycle_interval"] == 0:
                 success_rate = self.eval()
                 self._update_aaes_params(success_rate)
@@ -194,18 +191,28 @@ class HRLTrainer(Trainer):
                 pass
 
 
+
+            # =========== Update Observation to Next =============
+            obs = next_obs_dict
+
+
     
     def eval(self):
         return super().eval()
     
 
 
-    # ======= Auxillary Function ========
+
+
+
+    # ====================================================================== #
+    # ======================= Auxillary Function =========================== #
+    # ====================================================================== #
     def _sample_new_high_level_goal(self) -> torch.Tensor:
         """
             사전에 정의된 최종 목표 목록에서 새로운 목표를 샘플링합니다.
         """
-        # 실제로는 이 Pre-defined된 목표값들을 cfg 등에서 불러와야 합니다.
+        ####### 실제로는 이 Pre-defined된 목표값들을 cfg 등에서 불러와야 합니다. #####
         possible_goals = [
             torch.tensor([1, 1, 0, 0, ...], device=self.env.device),
             torch.tensor([0, 0, 1, 1, ...], device=self.env.device) 
@@ -299,24 +306,115 @@ class HRLTrainer(Trainer):
         """
             에피소드가 종료된 환경들에 대해 HER을 적용하고, 
             원본 및 증강된 경험을 저수준 리플레이 버퍼에 저장합니다.
+            여기서, 종료된 환경들에 대한 개별 처리를 통해 각자의 길이를 고려한 HER을 적용합니다.
         """
         # HER 관련 파라미터 가져오기
         her_cfg = self.cfg.get("her_kwargs", {})
-        k_ratio = her_cfg.get("k_ratio", 4)
-        strategy = her_cfg.get("strategy", "future")
+        k_ratio = her_cfg.get("k_ratio")
+        strategy = her_cfg.get("strategy")
+        batch_to_store = {
+            "states": [], "actions": [], "rewards": [], "next_states": [],
+            "terminated": [], "truncated": []
+        }
 
-        num_terminated_envs = len(env_ids)
-        if num_terminated_envs == 0:
-            return
-
-        # ======== 종료된 환경들의 궤적(Trajectories) 한 번에 추출 =========
-        # episode_buffer에서 각 텐서들을 인덱싱하여 필요한 데이터만 가져옴
+        # ======== 종료된 환경들의 Per Episode Trajectory 추출 =========
         episode_lengths = self.episode_step_ptr[env_ids]
-        max_len = episode_lengths.max()
+        for i, env_id in enumerate(env_ids):
+            real_length = episode_lengths[i].item()
+            if real_length == 0:
+                continue
+            trajectory = {k: v[:real_length, env_id] for k, v in self.episode_buffer.items()}
+            
+            batch_to_store["states"].append(trajectory["states"])
+            batch_to_store["actions"].append(trajectory["actions"])
+            batch_to_store["rewards"].append(trajectory["rewards"])
+            batch_to_store["next_states"].append(trajectory["next_states"])
+            batch_to_store["terminated"].append(trajectory["terminated"])
+            batch_to_store["truncated"].append(trajectory["truncated"])
+            
+            # ====== Augmented Data 저장 by HER ======
+            for t in range(real_length):
+                # t 시점의 데이터 세팅
+                obs = trajectory["states"][t]
+                action = trajectory["actions"][t]
+                reward = trajectory["rewards"][t]
+                next_obs = trajectory["next_states"][t]
+                terminated = trajectory["terminated"][t]
+                truncated = trajectory["truncated"][t]
 
-        ep_states = {k: v[:max_len, env_ids] for k, v in self.episode_buffer["states"]["policy"].items()}
-        ep_actions = self.episode_buffer["actions"][:max_len, env_ids]
-        ep_rewards = self.episode_buffer["rewards"][:max_len, env_ids]
-        ep_next_states = {k: v[:max_len, env_ids] for k, v in self.episode_buffer["next_states"]["policy"].items()}
-        ep_terminated = self.episode_buffer["terminated"][:max_len, env_ids]
-        ep_truncated = self.episode_buffer["truncated"][:max_len, env_ids]
+                for _ in range(k_ratio):
+                    if strategy == "future":
+                        future_step_idx = torch.randint(t, real_length)
+                    elif strategy == "episode":
+                        future_step_idx = torch.randint(0, real_length)
+                    else:
+                        ValueError("Not Supported HER Strategy.")
+                    
+                    # Original achieved goal : t시점의 achieved goal
+                    original_achieved_goal = trajectory["next_states"]["policy"]["achieved_goal"][t]
+                    # New desired goal : future_index 시점의 achieved goal
+                    new_desired_goal = trajectory["next_states"]["policy"]["achieved_goal"][future_step_idx]
+                    # Data Augmentation
+                    new_reward = self._recompute_reward(original_achieved_goal, new_desired_goal)
+                    synthetic_obs = copy.deepcopy(obs)
+                    synthetic_next_obs = copy.deepcopy(next_obs)
+                    synthetic_obs["policy"]["desired_goal"] = new_desired_goal
+                    synthetic_next_obs["policy"]["desired_goal"] = new_desired_goal
+
+                    batch_to_store["states"].append(synthetic_obs.unsqueeze(0))
+                    batch_to_store["actions"].append(action.unsqueeze(0))
+                    batch_to_store["rewards"].append(new_reward.unsqueeze(0))
+                    batch_to_store["next_states"].append(synthetic_next_obs.unsqueeze(0))
+                    batch_to_store["terminated"].append(terminated.unsqueeze(0))
+                    batch_to_store["truncated"].append(truncated.unsqueeze(0))
+            
+            if not batch_to_store["states"]:
+                return
+            
+            batch = {
+                "states": {k: torch.cat([s[k] for s in batch_to_store["states"]], dim=0) for k in batch_to_store["states"][0].keys()},
+                "actions": torch.cat(batch_to_store["actions"], dim=0),
+                "rewards": torch.cat(batch_to_store["rewards"], dim=0),
+                "next_states": {k: torch.cat([s[k] for s in batch_to_store["next_states"]], dim=0) for k in batch_to_store["next_states"][0].keys()},
+                "terminated": torch.cat(batch_to_store["terminated"], dim=0),
+                "truncated": torch.cat(batch_to_store["truncated"], dim=0),
+            }
+
+            # ======= 데이터 증강으로 인해, num_envs보다 차원이 커지는 경우, 배치 슬라이스 =======
+            total_samples_to_add = batch["actions"].shape[0]
+            slice_size = self.env.num_envs
+            if total_samples_to_add > 0:
+                for i in range(0, total_samples_to_add, slice_size):
+                    end_index = min(i + slice_size, total_samples_to_add)
+
+                    slice_batch = {}
+                    for name, value in batch.items():
+                        if isinstance(value, dict):
+                            slice_batch[name] = {k: v[i:end_index] for k, v in value.items()}
+                        else:
+                            slice_batch[name] = value[i:end_index]
+
+                    self.low_level_agent.memory.add_samples(**slice_batch)
+
+
+    
+    def _recompute_reward(self, achieved_goal: torch.Tensor, desired_goal: torch.Tensor) -> torch.Tensor:
+        loc_dist = torch.norm(achieved_goal[:, :3] - desired_goal[:, :3], dim=-1)
+        rot_dist = quat_error_magnitude(achieved_goal[:, 3:7], desired_goal[:, 3:7])
+
+        reward = torch.where(torch.logical_and(
+            loc_dist < self.env.cfg.low_level_loc_threshold,
+            rot_dist < self.env.cfg.low_level_rot_threshold,
+        ), 0.0, -1.0)
+
+        return reward
+    
+
+    def _apply_aaes(self):
+        pass
+
+    def _map_goal(self):
+        pass
+
+    def _update_aaes_params(self):
+        pass

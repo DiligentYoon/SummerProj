@@ -170,7 +170,6 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
     def _get_rewards(self):
 
         # === 저 수준 (Low-Level)에 대한 보상 계산 ===
-        # To Do : 이후에 PBRS 기반으로 Reward Shaping을 적용할 예정
         loc_to_subgoal = torch.norm(self.obs_buf["policy"]["achieved_goal"][:, :3] - \
                                     self.obs_buf["policy"]["desired_goal"][:, :3], dim=1)
         rot_to_subgoal = quat_error_magnitude(self.obs_buf["policy"]["achieved_goal"][:, 3:7], 
