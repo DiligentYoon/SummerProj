@@ -63,7 +63,7 @@ class HRLTrainer(Trainer):
         # HER을 구현하기 위한 에피소드 버퍼
         low_level_obs_space = self.low_level_agent.observation_space
         low_level_action_space = self.low_level_agent.action_space
-        self.max_episode_buffer_length = env.max_episode_lengths
+        self.max_episode_buffer_length = env._unwrapped.max_episode_length
 
         states_buffer = {}
         next_states_buffer = {}
@@ -103,7 +103,7 @@ class HRLTrainer(Trainer):
 
         # High-Level Goal
         self.high_level_goal = self._sample_new_high_level_goal()
-        self.env.set_high_level_goal(self.high_level_goal)
+        self.env._unwrapped.set_high_level_goal(self.high_level_goal)
 
         # Initialization Count for Loop
         self.episode_count = 0
@@ -127,7 +127,7 @@ class HRLTrainer(Trainer):
 
             # [Mapping Function] : From High-Level Action to Low-Level Goal State
             low_level_goal = self._map_goal(high_level_action, current_state)
-            self.env.set_low_level_goals(low_level_goal)
+            self.env._unwrapped.set_low_level_goals(low_level_goal)
 
             self.needs_new_high_level_action = False
             # Recording High-Level Action at Start Point
@@ -403,8 +403,8 @@ class HRLTrainer(Trainer):
         rot_dist = quat_error_magnitude(achieved_goal[:, 3:7], desired_goal[:, 3:7])
 
         reward = torch.where(torch.logical_and(
-            loc_dist < self.env.cfg.low_level_loc_threshold,
-            rot_dist < self.env.cfg.low_level_rot_threshold,
+            loc_dist < self.env._unwrapped.cfg.low_level_loc_threshold,
+            rot_dist < self.env._unwrapped.cfg.low_level_rot_threshold,
         ), 0.0, -1.0)
 
         return reward
@@ -413,8 +413,12 @@ class HRLTrainer(Trainer):
     def _apply_aaes(self):
         pass
 
-    def _map_goal(self):
-        pass
+    def _map_goal(self, high_level_action: torch.Tensor, current_obs: dict) -> torch.Tensor:
+        """
+            실제 매핑 로직을 환경 객체에 위임하고, 자신은 호출만 수행합니다.
+            ._unwrapped를 사용하여 래퍼를 우회하고 환경의 원본 메소드에 접근합니다.
+        """
+        return self.env._unwrapped._map_high_level_action_to_low_level_goal(high_level_action, current_obs)
 
     def _update_aaes_params(self):
         pass

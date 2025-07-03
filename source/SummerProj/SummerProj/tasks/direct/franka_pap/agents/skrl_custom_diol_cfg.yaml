@@ -100,13 +100,9 @@ agent:
 trainer:
   _target_: SummerProj.tasks.direct.franka_pap.trainers.trainer.HRLTrainer
   timesteps: 100000
-  episode_buffer_length: 1000
   epoch_interval: 1
   cycle_interval: 50
   episode_interval: 16
-  high_level_goal_dim: 10
-  low_level_goal_dim: 7
-  achieved_goal_dim: 7
   ca_upper_bound: 0.2
   csigma_upper_bound: 0.05
   smoothing_factor: 0.05

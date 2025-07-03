@@ -34,9 +34,6 @@ class DirectDIOL(DirectRLEnv):
 
         # HRL 관련 버퍼 초기화 (저 수준 목표 및 고 수준 최종 목표)
         self.reward_buf = -1.0 * torch.ones(self.num_envs, dtype=torch.float, device=self.device)
-        self.low_level_goals = torch.zeros((self.num_envs, self.cfg.goals.low_level_dim), dtype=torch.float, device=self.device)
-        self.high_level_goals = torch.zeros((self.num_envs, self.cfg.goals.high_level_dim), dtype=torch.float, device=self.device)
-        self.achieved_goals = torch.zeros((self.num_envs, self.cfg.goals.achieved_goal_dim), dtype=torch.float, device=self.device)
 
         # extras 딕셔너리에 HRL 관련 키들을 미리 초기화합니다.
         self.extras["high_level_reward"] = torch.zeros(self.num_envs, device=self.device)
@@ -68,8 +65,8 @@ class DirectDIOL(DirectRLEnv):
         self.single_action_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
         self.single_observation_space = gym.spaces.Dict()
         self.single_observation_space["observation"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,))
-        self.single_observation_space["achieved_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.goals.achieved_goal_dim,))
-        self.single_observation_space["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.goals.low_level_dim,))
+        self.single_observation_space["achieved_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.achieved_goal_dim,))
+        self.single_observation_space["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
         self.single_observation_space = gym.spaces.Dict({
             "policy": self.single_observation_space
         })
@@ -91,11 +88,3 @@ class DirectDIOL(DirectRLEnv):
     def _reset_idx(self, env_ids) -> None:
         super()._reset_idx(env_ids)
         self.reward_buf[env_ids] = -1.0
-    
-    
-    def set_high_level_goal(self, high_level_goal: torch.Tensor) -> None:
-        self.high_level_goals[:, :] = high_level_goal
-
-    
-    def set_low_level_goal(self, low_level_goal: torch.Tensor) -> None:
-        self.low_level_goals[:, :] = low_level_goal

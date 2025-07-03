@@ -13,21 +13,21 @@ from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms,
                                 combine_frame_transforms, quat_from_angle_axis, quat_mul, quat_inv, sample_uniform, saturate, \
                                 matrix_from_quat, quat_apply
 
-from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
+from .franka_pap_env_cfg import FrankaPapEnvCfg
 from .franka_base_env_diol import FrankaBaseDIOLEnv
 
 class FrankaPapEnv(FrankaBaseDIOLEnv):
     """Franka Pap Approach Environment for the Franka Emika Panda robot."""
-    cfg: FrankaBaseDIOLEnvCfg
-    def __init__(self, cfg: FrankaBaseDIOLEnvCfg, render_mode: str | None = None, **kwargs):
+    cfg: FrankaPapEnvCfg
+    def __init__(self, cfg: FrankaPapEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
         # Observation Buffer
         self.obs_buf = {
             "policy": {
                 "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
-                "achieved_goal": torch.zeros((self.num_envs, self.cfg.goals.achieved_goal_dim), device=self.device),
-                "desired_goal": torch.zeros((self.num_envs, self.cfg.goals.achieved_goal_dim), device=self.device)
+                "achieved_goal": torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device),
+                "desired_goal": torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device)
             }
         }
 
@@ -48,9 +48,15 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self.goal_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.goal_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
 
+        # High-Level Goal and Low-Level_goal
+        self.low_level_goals = torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), dtype=torch.float, device=self.device)
+        self.high_level_goals = torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), dtype=torch.float, device=self.device)
+        self.achieved_goals = torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), dtype=torch.float, device=self.device)
+
         # Robot and Object Grasp Poses
         self.robot_grasp_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.robot_grasp_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
+        self.robot_gripper_width = torch.zeros((self.num_envs, 1), device=self.device)
 
         # Object Move Checker & Success Checker
         self.prev_loc_error = torch.zeros(self.num_envs, device=self.device)
@@ -79,10 +85,11 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
     # ================= IK + Controller Gain =================
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         """
-        actions.shape  =  (N, 20)
-        0:6      →  Delta EE 6D Pose for IK                       (m, -)
-        6:13     →  Joint-stiffness for Impedance Control   (N·m/rad)
-        13:20    →  Damping-ratio for Impedance Control     (-)
+            actions.shape  =  (N, 21)
+            0:6      →  Delta EE 6D Pose for IK                 (m, -)
+            6:13     →  Joint-stiffness for Impedance Control   (N·m/rad)
+            13:20    →  Damping-ratio for Impedance Control     (-)
+            20:21    →  Gripper Open & Close Signal             (-)
         """
         self.actions = actions.clone()
         # ── 슬라이스 & 즉시 in-place clip ──────────────────────────
@@ -91,9 +98,10 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self.processed_actions[:, 6:13] = torch.clamp(self.actions[:, 6:13] * self.cfg.stiffness_scale,
                                                       self.robot_dof_stiffness_lower_limits,
                                                       self.robot_dof_stiffness_upper_limits)
-        self.processed_actions[:, 13:] = torch.clamp(self.actions[:, 13:] * self.cfg.damping_scale,
+        self.processed_actions[:, 13:20] = torch.clamp(self.actions[:, 13:20] * self.cfg.damping_scale,
                                                      self.robot_dof_damping_lower_limits,
-                                                     self.robot_dof_damping_upper_limits) 
+                                                     self.robot_dof_damping_upper_limits)
+        self.processed_actions[:, 20] = torch.where(self.actions[:, 20] < 0, self.finger_close_joint_pos, self.finger_open_joint_pos)
         
         # ===== IK Command 세팅 for absolute control =====
         target_loc_b = self.robot_grasp_pos_b[:, :3] + self.processed_actions[:, :3]
@@ -106,12 +114,12 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         
         # ===== Impedance Controller Gain 세팅 =====
         self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = self.processed_actions[:, 6:13]
-        self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = self.processed_actions[:, 13:]
+        self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = self.processed_actions[:, 13:20]
 
 
     def _apply_action(self) -> None:
         """
-            최종 커맨드 [N x 20] 생성 후 Controller API 호출.
+            최종 커맨드 [N x 21] 생성 후 Controller API 호출.
         """
         # ========= Data 세팅 ==========
         robot_root_pos = self._robot.data.root_state_w[:, :7]
@@ -155,6 +163,10 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         
         # ===== Target Torque 버퍼에 저장 =====
         self._robot.set_joint_effort_target(des_torque, joint_ids=self.joint_idx)
+        
+        # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
+        self._robot.set_joint_position_target(self.processed_actions[:, 20].unsqueeze(-1).expand(-1, 2), 
+                                              joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
         
     
     def _get_dones(self):
@@ -216,19 +228,26 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         # To Do : Low-Level Goal 기반으로 관측 구성해야 함 특히, goal_pos_b와 goal_pos_tcp를 수정해야 함
         low_level_obs = torch.cat(
             (   
-                # robot joint pose (7 not 9)
-                joint_pos_scaled[:, 0:self.num_active_joints],
-                # robot joint velocity (7 not 9)
-                self.robot_joint_vel[:, 0:self.num_active_joints],
+                # robot joint pose (7+2 = 9)
+                joint_pos_scaled[:, 0:self.num_active_joints+2],
+                # robot joint velocity (7+2 = 9)
+                self.robot_joint_vel[:, 0:self.num_active_joints+2],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,
                 # object position w.r.t Root frame (7)
                 self.goal_pos_b,
                 # object position w.r.t TCP frame (7)
-                goal_pos_tcp
+                goal_pos_tcp,
             ), dim=1
         )
-        achieved_goal = self.robot_grasp_pos_b[:, :7]
+        achieved_goal = torch.cat(
+            (   
+                # robot grasp pos w.r.t Root frame (7)
+                self.robot_grasp_pos_b[:, :7],
+                # gripper joint pos (2)
+                self.robot_joint_pos[:, 7:]
+            ), dim=1
+        )
         
         obs_buf = {
             "observation": low_level_obs,
@@ -284,6 +303,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         # ========= TCP 업데이트 ===========
         root_pos_w = self._robot.data.root_state_w[env_ids, :7]
         hand_pos_w = self._robot.data.body_state_w[env_ids, self.hand_link_idx, :7]
+        
         # data for joint
         self.robot_joint_pos[env_ids] = self._robot.data.joint_pos[env_ids]
         self.robot_joint_vel[env_ids] = self._robot.data.joint_vel[env_ids]
@@ -291,6 +311,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self.robot_grasp_pos_b[env_ids] = calculate_robot_tcp(hand_pos_w, root_pos_w, self.tcp_offset_hand[env_ids])
         self.robot_grasp_pos_w[env_ids, 3:7] = quat_mul(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, 3:7])
         self.robot_grasp_pos_w[env_ids, :3] = root_pos_w[:, :3] + quat_apply(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, :3])
+        # data for gripper state
         
         # ========= Position Error 업데이트 =========
         # To Do : Position Error 계산을 추후엔 Low-Level Goal에 맞춰서 적용할 수 있도록 수정 예정
@@ -331,6 +352,10 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         jacobian_b[:, 3:, :] = torch.bmm(matrix_from_quat(self.tcp_offset_hand[:, 3:7]), jacobian_b[:, 3:, :])
 
         return jacobian_b
+    
+
+    def _map_high_level_action_to_low_level_goal(self, high_level_action: torch.Tensor, current_obs: dict) -> torch.Tensor:
+        return super()._map_high_level_action_to_low_level_goal(high_level_action, current_obs)
     
 
 

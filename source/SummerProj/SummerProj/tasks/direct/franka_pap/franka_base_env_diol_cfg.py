@@ -62,6 +62,7 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
         ))
     # Impedance Controller를 사용하는 경우, 액추에이터 PD제어 모델 사용 X (중복 토크 계산)
     # 액추에이터에 Impedance Controller가 붙음으로써 최하단 제어기의 역할을 하게 되는 개념.
+    # However, Gripper 액추에이터는 끄지 않고, 추후 Binary Action에 의해 동작하도록 함.
     robot.actuators["panda_shoulder"].stiffness = 0.0
     robot.actuators["panda_shoulder"].damping = 0.0
     robot.actuators["panda_forearm"].stiffness = 0.0

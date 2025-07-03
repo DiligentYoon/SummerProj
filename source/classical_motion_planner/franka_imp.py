@@ -4,7 +4,7 @@ from isaaclab.app import AppLauncher
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on spawning and interacting with an articulation.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
-parser.add_argument("--test_mode", type=str, default="plotting", choices=["withstand", "tracking", "plotting"])
+parser.add_argument("--test_mode", type=str, default="withstand", choices=["withstand", "tracking", "plotting"])
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -107,6 +107,9 @@ def run_simulator(sim : sim_utils.SimulationContext, scene : InteractiveScene):
     n_j = len(joint_ids)
     frame_marker_cfg = FRAME_MARKER_CFG.copy()
     frame_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+    left_marker = VisualizationMarkers(frame_marker_cfg.replace(prim_path="/Visuals/left_finger"))
+    left_finger_link_idx = robot.find_bodies("panda_leftfinger")[0][0]
+    right_finger_link_idx = robot.find_bodies("panda_rightfinger")[0][0]
 
     # Relative Impedance Controller
     joint_imp_cfg = JointImpedanceControllerCfg(command_type="p_rel", 
@@ -204,6 +207,14 @@ def run_simulator(sim : sim_utils.SimulationContext, scene : InteractiveScene):
             scene.update(sim_dt)
             count += 1
 
+            # 시각화
+            left_finger_pos_w = robot.data.body_state_w[:, left_finger_link_idx, :7]
+            right_finger_pos_w = robot.data.body_state_w[:, right_finger_link_idx, :7]
+            left_marker.visualize(left_finger_pos_w[:, :3], left_finger_pos_w[:, 3:7])
+            width = torch.norm(left_finger_pos_w[:, :3] - right_finger_pos_w[:, :3])
+            print(f"gripper width : {width}")
+
+
     elif args_cli.test_mode == "plotting":
         first = True
         log_t = []
@@ -276,6 +287,7 @@ def run_simulator(sim : sim_utils.SimulationContext, scene : InteractiveScene):
             # 7) 로그 저장
             log_t.append(t)
             log_q.append(robot.data.joint_pos[:, :n_j].clone())
+            
 
 
         # --- 결과 플롯 -------------------------------------------------

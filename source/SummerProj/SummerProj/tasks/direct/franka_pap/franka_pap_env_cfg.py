@@ -22,9 +22,11 @@ class FrankaPapEnvCfg(FrankaBaseDIOLEnvCfg):
     # env
     episode_length_s = 10.0
     decimation = 10
-    action_space = 20
-    observation_space = 35
+    action_space = 21
+    observation_space = 39
     state_space = 0
+
+    high_level_goal_dim = 10
 
     # simulation
     sim: SimulationCfg = SimulationCfg(

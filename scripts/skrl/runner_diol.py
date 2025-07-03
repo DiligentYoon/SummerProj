@@ -32,18 +32,22 @@ class AISLDIOLRunner(Runner):
         # High-Level 정책(DIOL)을 위한 공간
         # High-Level Policy : \pi_{g}^H (a^H | s, g^H)
         # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
+        # single_high_level_observation_space = gym.spaces.Dict({
+        #     "observation": env._unwrapped.single_observation_space["policy"]["observation"],
+        #     "desired_goal": gym.spaces.MultiBinary(cfg["trainer"]["high_level_goal_dim"])
+        # })
         single_high_level_observation_space = gym.spaces.Dict({
             "observation": env._unwrapped.single_observation_space["policy"]["observation"],
-            "desired_goal": gym.spaces.MultiBinary(cfg["trainer"]["high_level_goal_dim"])
+            "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
         })
-        single_high_level_action_space = gym.spaces.Discrete(cfg["trainer"]["high_level_goal_dim"])
+        single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_goal_dim)
         high_level_observation_space = gym.vector.utils.batch_space(single_high_level_observation_space, self._env.num_envs)
         high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
 
 
         # Low-Level 정책(DDPG)을 위한 공간
         low_level_observation_space = env._unwrapped.observation_space 
-        low_level_action_space = env.action_space
+        low_level_action_space = env._unwrapped.action_space
 
 
         # ==== 모델을 저장할 Dictionary 초기화 ====
@@ -123,7 +127,7 @@ class AISLDIOLRunner(Runner):
             
             # 고수준 메모리(리플레이 버퍼) 생성
             memory_class = self._component(memory_cfg_high.get("class", "RandomMemory"))
-            memory_high = memory_class(memory_size=memory_cfg_high.get("memory_size", 10000), 
+            memory_high = memory_class(memory_size=memory_cfg_high.get("memory_size"), 
                                        num_envs=env.num_envs, 
                                        device=env.device)
             
@@ -158,7 +162,7 @@ class AISLDIOLRunner(Runner):
             
             # 저수준 메모리(리플레이 버퍼) 생성
             memory_class = self._component(memory_cfg_low.get("class", "RandomMemory"))
-            memory_low = memory_class(memory_size=memory_cfg_low.get("memory_size", 100000),
+            memory_low = memory_class(memory_size=memory_cfg_low.get("memory_size"),
                                       num_envs=env.num_envs,
                                       device=env.device)
             
@@ -179,7 +183,7 @@ class AISLDIOLRunner(Runner):
             self.low_level_agent = agent_class(models=models_low,
                                                 memory=memory_low,
                                                 observation_space=env._unwrapped.observation_space,
-                                                action_space=env.action_space,
+                                                action_space=env._unwrapped.action_space,
                                                 device=env.device,
                                                 cfg=agent_cfg_low)
             
