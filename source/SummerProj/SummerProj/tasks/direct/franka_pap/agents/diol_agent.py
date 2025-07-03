@@ -63,18 +63,20 @@ class DIOLAgent(Agent):
         self._exploration_epsilon = self.cfg["exploration"]["initial_epsilon"]
         self._epsilon_decay = (self.cfg["exploration"]["initial_epsilon"] - self.cfg["exploration"]["final_epsilon"]) / self.cfg["exploration"]["timesteps"]
 
-    def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> torch.Tensor:
+    def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> tuple[torch.Tensor, None, dict]:
         """Epsilon-greedy 전략에 따라 행동을 결정"""
         # 엡실론 값 업데이트
         self._exploration_epsilon = max(self.cfg["exploration"]["final_epsilon"], self._exploration_epsilon - self._epsilon_decay)
         
         # 무작위 행동 선택 (Exploration)
         if torch.rand(1).item() < self._exploration_epsilon:
-            return self.action_space.sample(states.shape[0])
+            actions = self.action_space.sample(states.shape[0])
+            return actions, None, {}
         
         # Q-value가 가장 높은 행동 선택 (Exploitation)
         q_values, _ = self.q_network.compute({"states": states})
-        return torch.argmax(q_values, dim=1, keepdim=True)
+        actions = torch.argmax(q_values, dim=1, keepdim=True)
+        return actions, None, {}
 
     def record_transition(self,
                           states: torch.Tensor,

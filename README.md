@@ -1,135 +1,111 @@
-# Template for Isaac Lab Projects
+# Hierarchical Reinforcement Learning for Robotic Manipulation
 
-## Overview
+This repository contains a project for training a Franka Emika Panda robot to perform a **Pick-and-Place** task within the **NVIDIA Isaac Sim** environment. The project leverages a sophisticated **Hierarchical Reinforcement Learning (HRL)** framework, decomposing the complex manipulation task into a series of simpler, manageable sub-goals.
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
-It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
+## Core Architecture: A Two-Level HRL Approach
 
-**Key Features:**
+The learning process is driven by a two-tiered hierarchical structure, separating high-level strategic decisions from low-level motor control.
 
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+```
++-----------------------------+
+|      HRL Trainer            |
+| (Orchestrator: trainer.py)  |
++-----------------------------+
+            |
+            v
++-----------------------------+      (1. "What to do?")      +--------------------------------+
+| High-Level Policy (DIOL)    |---------------------------->| Environment (Task-Specific Env) |
+| (The "Mastermind")          |      (Integer Action)       | (The "Translator")              |
++-----------------------------+                             +--------------------------------+
+            ^                                                              |
+            | (4. State Update)                                            | (2. "How to do it?")
+            |                                                              | (Sub-Goal Pose)
++-----------------------------+                             +--------------------------------+
+| Low-Level Policy (DDPG+HER) |<----------------------------|                                |
+| (The "Skill Executor")      |      (3. Continuous Action) |                                |
++-----------------------------+---------------------------->+--------------------------------+
+```
 
-**Keywords:** extension, template, isaaclab
+1.  **High-Level Policy (The "Mastermind")**:
+    *   **Agent**: `DIOLAgent`, a custom DQN-style agent.
+    *   **Responsibility**: Observes the state of the world and makes strategic, high-level decisions (e.g., "approach the object," "grasp it"). It outputs a single integer representing the chosen abstract action.
 
-## Installation
+2.  **Environment as a Translator**:
+    *   **Component**: `_map_high_level_action_to_low_level_goal` method in `franka_pap_env.py`.
+    *   **Responsibility**: Translates the abstract integer action from the high-level policy into a concrete, physical sub-goal (e.g., a specific 6D pose for the robot's end-effector).
 
-- Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
-  We recommend using the conda installation as it simplifies calling Python scripts from the terminal.
+3.  **Low-Level Policy (The "Skill Executor")**:
+    *   **Agent**: Standard `DDPG` agent from the `skrl` library.
+    *   **Responsibility**: Receives the concrete sub-goal and generates the continuous, low-level motor commands (delta poses and impedance control gains) required to achieve it.
+    *   **Key Feature**: Employs **Hindsight Experience Replay (HER)** to learn efficiently from both successful and failed attempts, dramatically improving sample efficiency.
 
-- Clone or copy this project/repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
+## Key Features
 
-- Using a python interpreter that has Isaac Lab installed, install the library in editable mode using:
+-   **Hierarchical Control**: Decomposes a long-horizon task into simpler skills, making learning more tractable.
+-   **Custom HRL Framework**: Built on top of `skrl`, featuring a custom `HRLTrainer`, `DIOLAgent`, and specialized environment wrappers.
+-   **Hindsight Experience Replay (HER)**: Enables the low-level policy to learn from failures by retroactively treating achieved states as intended goals.
+-   **Task-Specific Action Abstraction**: High-level actions are clearly defined in an Enum (`FrankaPapAction`), making the code readable and easily extensible.
+-   **Impedance Control**: Utilizes joint impedance control for safer and more compliant robot interaction with the environment.
+
+## Getting Started
+
+### Prerequisites
+
+-   **NVIDIA Isaac Sim**: Ensure Isaac Sim is installed correctly.
+-   **Isaac Lab**: This project is built upon Isaac Lab. Follow the official [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
+
+### Installation
+
+1.  Clone this repository to a location of your choice.
+2.  Install the project package in editable mode. This allows you to modify the source code without reinstalling.
 
     ```bash
-    # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python -m pip install -e source/SummerProj
+    # From the repository's root directory
+    # Ensure your python environment has Isaac Lab's dependencies
+    pip install -e source/SummerProj
+    ```
 
-- Verify that the extension is correctly installed by:
+### Running the HRL Training
 
-    - Listing the available tasks:
-
-        Note: It the task name changes, it may be necessary to update the search pattern `"Template-"`
-        (in the `scripts/list_envs.py` file) so that it can be listed.
-
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/list_envs.py
-        ```
-
-    - Running a task:
-
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
-        ```
-
-    - Running a task with dummy agents:
-
-        These include dummy agents that output zero or random agents. They are useful to ensure that the environments are configured correctly.
-
-        - Zero-action agent
-
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/zero_agent.py --task=<TASK_NAME>
-            ```
-        - Random-action agent
-
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/random_agent.py --task=<TASK_NAME>
-            ```
-
-### Set up IDE (Optional)
-
-To setup the IDE, please follow these instructions:
-
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
-
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
-
-### Setup as Omniverse Extension (Optional)
-
-We provide an example UI extension that will load upon enabling your extension defined in `source/SummerProj/SummerProj/ui_extension_example.py`.
-
-To enable your extension, follow these steps:
-
-1. **Add the search path of this project/repository** to the extension manager:
-    - Navigate to the extension manager using `Window` -> `Extensions`.
-    - Click on the **Hamburger Icon**, then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to the `source` directory of this project/repository.
-    - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
-    - Click on the **Hamburger Icon**, then click `Refresh`.
-
-2. **Search and enable your extension**:
-    - Find your extension under the `Third Party` category.
-    - Toggle it to enable your extension.
-
-## Code formatting
-
-We have a pre-commit template to automatically format your code.
-To install pre-commit:
+To start the training process for the Franka Pick-and-Place task, run the custom training script:
 
 ```bash
+# Use the full path to isaaclab.sh/bat if it's not in your PATH
+python scripts/skrl/train_custom.py --task Franka-PickandPlace-Direct-v0
+```
+
+-   `--task Franka-PickandPlace-Direct-v0`: Specifies the custom HRL environment.
+-   This script will automatically instantiate the `AISLDIOLRunner`, which assembles the entire HRL framework (agents, models, trainer) based on the configurations in `skrl_custom_diol_cfg.yaml`.
+
+### Evaluating a Trained Agent
+
+To watch a trained agent perform, use the `play_custom.py` script, pointing it to the desired checkpoint file.
+
+```bash
+python scripts/skrl/play_custom.py --task Franka-PickandPlace-Direct-v0 --checkpoint /path/to/your/checkpoint.pt
+```
+
+## Code Structure
+
+-   `GEMINI.md`: A detailed document outlining the project architecture, data flow, and key files for AI-assisted development.
+-   `scripts/skrl/`: Contains the primary scripts for **training (`train_custom.py`)** and **evaluation (`play_custom.py`)**.
+    -   `runner_diol.py`: The `AISLDIOLRunner` class, responsible for orchestrating the setup of the HRL framework.
+-   `source/SummerProj/`: The core Python package for the project.
+    -   `tasks/direct/franka_pap/`: The heart of the project, defining the Pick-and-Place task.
+        -   `franka_pap_env.py`: The main Gym environment, including the crucial goal-mapping logic.
+        -   `franka_pap_env_cfg.py`: Configuration for the environment.
+        -   `task_tables/pap_task_table.py`: Defines the high-level action abstractions (`FrankaPapAction`).
+        -   `agents/`: Contains the custom `DIOLAgent` and the central `skrl_custom_diol_cfg.yaml` configuration file.
+        -   `models/`: Defines the custom PyTorch neural network architectures for both policies.
+        -   `trainers/`: Includes the `HRLTrainer` that manages the entire hierarchical learning loop and HER.
+
+## Code Formatting
+
+This project uses `pre-commit` for automated code formatting.
+
+```bash
+# Install pre-commit
 pip install pre-commit
-```
-
-Then you can run pre-commit with:
-
-```bash
+# Run on all files
 pre-commit run --all-files
-```
-
-## Troubleshooting
-
-### Pylance Missing Indexing of Extensions
-
-In some VsCode versions, the indexing of part of the extensions is missing.
-In this case, add the path to your extension in `.vscode/settings.json` under the key `"python.analysis.extraPaths"`.
-
-```json
-{
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/SummerProj"
-    ]
-}
-```
-
-### Pylance Crash
-
-If you encounter a crash in `pylance`, it is probable that too many files are indexed and you run out of memory.
-A possible solution is to exclude some of omniverse packages that are not used in your project.
-To do so, modify `.vscode/settings.json` and comment out packages under the key `"python.analysis.extraPaths"`
-Some examples of packages that can likely be excluded are:
-
-```json
-"<path-to-isaac-sim>/extscache/omni.anim.*"         // Animation packages
-"<path-to-isaac-sim>/extscache/omni.kit.*"          // Kit UI tools
-"<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
-"<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
-...
 ```

@@ -123,7 +123,7 @@ class HRLTrainer(Trainer):
                 current_state = obs["policy"]["observation"]
 
                 # High-Level Agent action : Discrete Action from DIOL Agent
-                high_level_action = self.high_level_agent.act(current_state, timestep=timestep, timesteps=self.timesteps)[0]
+                high_level_action, _, _ = self.high_level_agent.act(current_state, timestep=timestep, timesteps=self.timesteps)
 
             # [Mapping Function] : From High-Level Action to Low-Level Goal State
             low_level_goal = self._map_goal(high_level_action, current_state)

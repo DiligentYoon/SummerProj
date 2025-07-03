@@ -15,6 +15,7 @@ from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms,
 
 from .franka_pap_env_cfg import FrankaPapEnvCfg
 from .franka_base_env_diol import FrankaBaseDIOLEnv
+from .task_tables.pap_task_table import FrankaPapAction
 
 class FrankaPapEnv(FrankaBaseDIOLEnv):
     """Franka Pap Approach Environment for the Franka Emika Panda robot."""
@@ -355,7 +356,74 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
     
 
     def _map_high_level_action_to_low_level_goal(self, high_level_action: torch.Tensor, current_obs: dict) -> torch.Tensor:
-        return super()._map_high_level_action_to_low_level_goal(high_level_action, current_obs)
+        """Mapping a discrete high-level action to a continuous low-level goal state."""
+        # Initialize low-level goals with current achieved goals as a baseline
+        low_level_goals = current_obs["policy"]["achieved_goal"].clone()
+        
+        # Get current object and final goal positions from the environment state
+        object_pos_w = self._object.data.root_state_w[:, :7]
+        final_goal_pos_w = self.goal_pos_w[:, :7]
+
+        for i, action_idx in enumerate(high_level_action.view(-1)):
+            action = FrankaPapAction(action_idx.item())
+            
+            # Current gripper state is to remain as is
+            gripper_state = low_level_goals[i, 7:]
+
+            if action == FrankaPapAction.APPROACH_OBJECT:
+                # Goal: Position above the object, gripper open
+                target_pos = object_pos_w[i, :3] + torch.tensor([0.0, 0.0, self.cfg.approach_offset_z], device=self.device)
+                target_rot = object_pos_w[i, 3:7] # Maintain object's orientation
+                gripper_state = torch.tensor([self.cfg.gripper_open_width, self.cfg.gripper_open_width], device=self.device)
+            
+            elif action == FrankaPapAction.DESCEND_TO_OBJECT:
+                # Goal: Object's position, gripper open
+                target_pos = object_pos_w[i, :3]
+                target_rot = object_pos_w[i, 3:7]
+                gripper_state = torch.tensor([self.cfg.gripper_open_width, self.cfg.gripper_open_width], device=self.device)
+
+            elif action == FrankaPapAction.GRASP_OBJECT:
+                # Goal: Maintain current TCP pose, close gripper
+                target_pos = self.robot_grasp_pos_w[i, :3]
+                target_rot = self.robot_grasp_pos_w[i, 3:7]
+                gripper_state = torch.tensor([self.cfg.gripper_close_width, self.cfg.gripper_close_width], device=self.device)
+
+            elif action == FrankaPapAction.LIFT_OBJECT:
+                # Goal: Lift from current position, gripper closed
+                target_pos = self.robot_grasp_pos_w[i, :3] + torch.tensor([0.0, 0.0, self.cfg.approach_offset_z], device=self.device)
+                target_rot = self.robot_grasp_pos_w[i, 3:7]
+                gripper_state = torch.tensor([self.cfg.gripper_close_width, self.cfg.gripper_close_width], device=self.device)
+
+            elif action == FrankaPapAction.MOVE_TO_GOAL:
+                # Goal: Position above the final goal, gripper closed
+                target_pos = final_goal_pos_w[i, :3] + torch.tensor([0.0, 0.0, self.cfg.approach_offset_z], device=self.device)
+                target_rot = final_goal_pos_w[i, 3:7]
+                gripper_state = torch.tensor([self.cfg.gripper_close_width, self.cfg.gripper_close_width], device=self.device)
+
+            elif action == FrankaPapAction.DESCEND_TO_GOAL:
+                # Goal: Final goal position, gripper closed
+                target_pos = final_goal_pos_w[i, :3]
+                target_rot = final_goal_pos_w[i, 3:7]
+                gripper_state = torch.tensor([self.cfg.gripper_close_width, self.cfg.gripper_close_width], device=self.device)
+
+            elif action == FrankaPapAction.RELEASE_OBJECT:
+                # Goal: Maintain current TCP pose, open gripper
+                target_pos = self.robot_grasp_pos_w[i, :3]
+                target_rot = self.robot_grasp_pos_w[i, 3:7]
+                gripper_state = torch.tensor([self.cfg.gripper_open_width, self.cfg.gripper_open_width], device=self.device)
+
+            elif action == FrankaPapAction.RETREAT_FROM_GOAL:
+                # Goal: Retreat from current position, gripper open
+                target_pos = self.robot_grasp_pos_w[i, :3] + torch.tensor([0.0, 0.0, self.cfg.approach_offset_z], device=self.device)
+                target_rot = self.robot_grasp_pos_w[i, 3:7]
+                gripper_state = torch.tensor([self.cfg.gripper_open_width, self.cfg.gripper_open_width], device=self.device)
+
+            # Update the goals for the specific environment
+            low_level_goals[i, :3] = target_pos
+            low_level_goals[i, 3:7] = target_rot
+            low_level_goals[i, 7:] = gripper_state
+
+        return low_level_goals
     
 
 
