@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 from abc import abstractmethod
 
@@ -16,7 +15,7 @@ from isaaclab.markers import VisualizationMarkers
 from isaaclab.controllers.joint_impedance import JointImpedanceController
 from isaaclab.controllers import DifferentialIKController
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import quat_apply, quat_from_angle_axis, quat_mul, sample_uniform
+from isaaclab.utils.math import sample_uniform
 
 from .franka_base_env_cfg import FrankaBaseEnvCfg
 

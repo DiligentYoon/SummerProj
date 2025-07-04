@@ -11,7 +11,7 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.markers.config import FRAME_MARKER_CFG, CUBOID_MARKER_CFG
-from .franka_base_env_cfg import FrankaBaseEnvCfg
+from ..base.franka_base_env_cfg import FrankaBaseEnvCfg
 
 
 @configclass

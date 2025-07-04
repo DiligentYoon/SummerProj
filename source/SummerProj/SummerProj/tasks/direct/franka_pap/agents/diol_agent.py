@@ -1,7 +1,9 @@
 # File: source/SummerProj/SummerProj/tasks/direct/franka_pap/agents/diol_agent.py
 from typing import Union, Dict, Any, Mapping
 
+import os
 import copy
+import numpy as np
 import torch
 import torch.nn as nn
 import gymnasium as gym
@@ -91,15 +93,39 @@ class DIOLAgent(Agent):
             HRL을 위한 특별한 전환(transition)을 메모리에 기록
             'option_terminated' 플래그를 infos에서 가져와 버퍼에 함께 저장
         """
-        # 부모 클래스의 record_transition을 호출하여 기본적인 정보를 메모리에 저장
-        super().record_transition(states=states,
-                                  actions=actions,
-                                  rewards=rewards,
-                                  next_states=next_states,
-                                  terminated=terminated,
-                                  truncated=truncated,
-                                  infos=infos,
-                                  **kwargs)
+        if self.write_interval > 0:
+            # compute the cumulative sum of the rewards and timesteps
+            if self._cumulative_rewards is None:
+                self._cumulative_rewards = torch.zeros_like(rewards, dtype=torch.float32)
+                self._cumulative_timesteps = torch.zeros_like(rewards, dtype=torch.int32)
+
+            self._cumulative_rewards.add_(rewards)
+            self._cumulative_timesteps.add_(1)
+
+            # check ended episodes
+            finished_episodes = (terminated + truncated).nonzero(as_tuple=False)
+            if finished_episodes.numel():
+
+                # storage cumulative rewards and timesteps
+                self._track_rewards.extend(self._cumulative_rewards[finished_episodes][:, 0].reshape(-1).tolist())
+                self._track_timesteps.extend(self._cumulative_timesteps[finished_episodes][:, 0].reshape(-1).tolist())
+
+                # reset the cumulative rewards and timesteps
+                self._cumulative_rewards[finished_episodes] = 0
+                self._cumulative_timesteps[finished_episodes] = 0
+
+                # record reward data
+                self.tracking_data["[High] Reward / Instantaneous reward (max)"].append(torch.max(rewards).item())
+                self.tracking_data["[High] Reward / Instantaneous reward (min)"].append(torch.min(rewards).item())
+                self.tracking_data["[High] Reward / Instantaneous reward (mean)"].append(torch.mean(rewards).item())
+
+                if len(self._track_rewards):
+                    track_rewards = np.array(self._track_rewards)
+
+                    self.tracking_data["[High] Reward / Total reward (max)"].append(np.max(track_rewards))
+                    self.tracking_data["[High] Reward / Total reward (min)"].append(np.min(track_rewards))
+                    self.tracking_data["[High] Reward / Total reward (mean)"].append(np.mean(track_rewards))
+
 
     def _update(self, timestep: int, timesteps: int) -> None:
         """DIOL 업데이트 규칙에 따라 Q-네트워크를 학습"""
@@ -153,3 +179,69 @@ class DIOLAgent(Agent):
         # --- Target Network의 Soft Update ---
         for target_param, param in zip(self.target_q_network.parameters(), self.q_network.parameters()):
             target_param.data.copy_(self.cfg["polyak"] * param.data + (1.0 - self.cfg["polyak"]) * target_param.data)
+
+
+    
+    def write_tracking_data(self, timestep: int, timesteps: int) -> None:
+        """Write tracking data to TensorBoard
+
+        :param timestep: Current timestep
+        :type timestep: int
+        :param timesteps: Number of timesteps
+        :type timesteps: int
+        """
+        for k, v in self.tracking_data.items():
+            if k.endswith("(min)"):
+                self.writer.add_scalar(k, np.min(v), timestep)
+            elif k.endswith("(max)"):
+                self.writer.add_scalar(k, np.max(v), timestep)
+            else:
+                self.writer.add_scalar(k, np.mean(v), timestep)
+        # reset data containers for next iteration
+        self._track_rewards.clear()
+        self._track_timesteps.clear()
+        self.tracking_data.clear()
+    
+    def write_checkpoint(self, timestep: int, timesteps: int) -> None:
+        """Write checkpoint (modules) to disk
+
+        The checkpoints are saved in the directory 'checkpoints' in the experiment directory.
+        The name of the checkpoint is the current timestep if timestep is not None, otherwise it is the current time.
+
+        :param timestep: Current timestep
+        :type timestep: int
+        :param timesteps: Number of timesteps
+        :type timesteps: int
+        """
+        tag = str(timestep if timestep is not None else datetime.datetime.now().strftime("%y-%m-%d_%H-%M-%S-%f"))
+        # separated modules
+        if self.checkpoint_store_separately:
+            for name, module in self.checkpoint_modules.items():
+                torch.save(
+                    self._get_internal_value(module),
+                    os.path.join(self.experiment_dir, "high_checkpoints", f"{name}_{tag}.pt"),
+                )
+        # whole agent
+        else:
+            modules = {}
+            for name, module in self.checkpoint_modules.items():
+                modules[name] = self._get_internal_value(module)
+            torch.save(modules, os.path.join(self.experiment_dir, "high_checkpoints", f"agent_{tag}.pt"))
+
+        # best modules
+        if self.checkpoint_best_modules["modules"] and not self.checkpoint_best_modules["saved"]:
+            # separated modules
+            if self.checkpoint_store_separately:
+                for name, module in self.checkpoint_modules.items():
+                    torch.save(
+                        self.checkpoint_best_modules["modules"][name],
+                        os.path.join(self.experiment_dir, "high_checkpoints", f"best_{name}.pt"),
+                    )
+            # whole agent
+            else:
+                modules = {}
+                for name, module in self.checkpoint_modules.items():
+                    modules[name] = self.checkpoint_best_modules["modules"][name]
+                torch.save(modules, os.path.join(self.experiment_dir, "high_checkpoints", "best_agent.pt"))
+            self.checkpoint_best_modules["saved"] = True
+        

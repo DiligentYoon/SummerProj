@@ -4,18 +4,14 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
-from dataclasses import MISSING
-from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
 import isaaclab.sim as sim_utils
-import isaaclab.envs.mdp as mdp
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.envs import DirectRLEnvCfg
-from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab_assets.robots.franka import FRANKA_PANDA_CFG
@@ -23,66 +19,10 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
 from isaaclab.controllers import DifferentialIKControllerCfg
 from isaaclab.controllers.joint_impedance import JointImpedanceControllerCfg
 
+from source.SummerProj.SummerProj.envs.direct_diol_env_cfg import DirectDIOLCfg
 
 @configclass
-# class EventCfg:
-#     """Configuration for randomization."""
-
-#     # -- robot
-#     robot_physics_material = EventTerm(
-#         func=mdp.randomize_rigid_body_material,
-#         mode="reset",
-#         min_step_count_between_reset=720,
-#         params={
-#             "asset_cfg": SceneEntityCfg("robot"),
-#             "static_friction_range": (0.7, 1.3),
-#             "dynamic_friction_range": (1.0, 1.0),
-#             "restitution_range": (1.0, 1.0),
-#             "num_buckets": 250,
-#         },
-#     )
-#     robot_joint_stiffness_and_damping = EventTerm(
-#         func=mdp.randomize_actuator_gains,
-#         min_step_count_between_reset=720,
-#         mode="reset",
-#         params={
-#             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-#             "stiffness_distribution_params": (0.75, 1.5),
-#             "damping_distribution_params": (0.3, 3.0),
-#             "operation": "scale",
-#             "distribution": "log_uniform",
-#         },
-#     )
-
-#     # -- object
-#     object_physics_material = EventTerm(
-#         func=mdp.randomize_rigid_body_material,
-#         min_step_count_between_reset=720,
-#         mode="reset",
-#         params={
-#             "asset_cfg": SceneEntityCfg("object"),
-#             "static_friction_range": (0.7, 1.3),
-#             "dynamic_friction_range": (1.0, 1.0),
-#             "restitution_range": (1.0, 1.0),
-#             "num_buckets": 250,
-#         },
-#     )
-#     object_scale_mass = EventTerm(
-#         func=mdp.randomize_rigid_body_mass,
-#         min_step_count_between_reset=720,
-#         mode="reset",
-#         params={
-#             "asset_cfg": SceneEntityCfg("object"),
-#             "mass_distribution_params": (0.5, 1.5),
-#             "operation": "scale",
-#             "distribution": "uniform",
-#         },
-#     )
-
-
-
-@configclass
-class FrankaBaseEnvCfg(DirectRLEnvCfg):
+class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
     # env
     episode_length_s: int
     decimation: int
@@ -119,6 +59,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
         ))
     # Impedance Controller를 사용하는 경우, 액추에이터 PD제어 모델 사용 X (중복 토크 계산)
     # 액추에이터에 Impedance Controller가 붙음으로써 최하단 제어기의 역할을 하게 되는 개념.
+    # However, Gripper 액추에이터는 끄지 않고, 추후 Binary Action에 의해 동작하도록 함.
     robot.actuators["panda_shoulder"].stiffness = 0.0
     robot.actuators["panda_shoulder"].damping = 0.0
     robot.actuators["panda_forearm"].stiffness = 0.0
@@ -204,3 +145,4 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     # target point reset
     reset_position_noise_x = 0.1
     reset_position_noise_y = 0.2
+    

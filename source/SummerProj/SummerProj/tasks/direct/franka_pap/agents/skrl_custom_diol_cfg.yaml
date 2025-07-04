@@ -103,13 +103,18 @@ trainer:
   epoch_interval: 1
   cycle_interval: 50
   episode_interval: 16
-  ca_upper_bound: 0.2
-  csigma_upper_bound: 0.05
-  smoothing_factor: 0.05
-  demo_ratio: 0.6
+  # AAES (Auto-Adjusting Exploration Strategy)
+  aaes_kwargs:
+    initial_std: 0.5
+    min_std: 0.05
+    max_std: 1.0
+    reduction_factor: 0.99
+    increase_factor: 1.01
+    success_threshold_high: 0.8
+    success_threshold_low: 0.2
   # HER 관련 설정
   her_kwargs:
-    k_ratio: 4 # 논문에서 제안한 k=4에 해당하는 값 (비율로 조절 가능)
-    strategy: "future"
+    k_ratio: 4
+    strategy: "future" # future or episode
     low_threshold: 0.05
     high_threshold: 0.1

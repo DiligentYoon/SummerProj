@@ -32,10 +32,6 @@ class AISLDIOLRunner(Runner):
         # High-Level 정책(DIOL)을 위한 공간
         # High-Level Policy : \pi_{g}^H (a^H | s, g^H)
         # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
-        # single_high_level_observation_space = gym.spaces.Dict({
-        #     "observation": env._unwrapped.single_observation_space["policy"]["observation"],
-        #     "desired_goal": gym.spaces.MultiBinary(cfg["trainer"]["high_level_goal_dim"])
-        # })
         single_high_level_observation_space = gym.spaces.Dict({
             "observation": env._unwrapped.single_observation_space["policy"]["observation"],
             "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)

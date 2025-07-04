@@ -14,8 +14,8 @@ from isaaclab.utils import configclass
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
-from .task_tables.pap_task_table import FrankaPapAction
+from ..base.franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
+from ..task_tables.pap_task_table import FrankaPapAction
 
 
 @configclass
@@ -27,14 +27,16 @@ class FrankaPapEnvCfg(FrankaBaseDIOLEnvCfg):
     observation_space = 39
     state_space = 0
 
-    high_level_goal_dim = len(FrankaPapAction)
+    high_level_goal_dim = 14
+    high_level_action_dim = len(FrankaPapAction)
+
 
     # === HRL Mapping Constants ===
     # Z-axis offset for approach and retreat phases
     approach_offset_z: float = 0.10
     # Gripper states
-    gripper_open_width: float = 0.04
-    gripper_close_width: float = 0.00
+    gripper_open_joint: float = 0.04
+    gripper_close_joint: float = 0.00
 
     # simulation
     sim: SimulationCfg = SimulationCfg(

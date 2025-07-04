@@ -95,3 +95,31 @@ This section tracks changes made during our interactive sessions.
 -   **Bug Fixes**:
     -   Corrected the return signature of `DIOLAgent.act()` to conform to the `skrl` standard (returning a tuple `(actions, None, {})` instead of just a tensor).
     -   Adjusted the call site in `HRLTrainer.train()` to correctly unpack the tuple returned by `DIOLAgent.act()`.
+
+---
+
+## 6. Current Status & Next Steps
+
+### 6.1. Current Challenges
+
+-   **Low-Level Policy Integration**: The primary challenge is ensuring the low-level DDPG agent effectively learns to achieve the sub-goals provided by the high-level policy. This involves:
+    -   Correctly configuring the DDPG agent's hyperparameters.
+    -   Ensuring the state and action spaces for the low-level policy are correctly defined and handled.
+    -   Verifying the Hindsight Experience Replay (HER) implementation is correctly populating the low-level agent's replay memory with relevant experiences.
+-   **Model Architecture**: Confirming that the `FrankaDeterministicPolicy` (Actor) and `FrankaValue` (Critic) networks in `custom_diol_net.py` are appropriately designed for the low-level control task.
+-   **Training Stability**: Debugging and stabilizing the overall HRL training process, which can be complex due to the interaction between two learning agents.
+
+### 6.2. Next Steps
+
+1.  **Low-Level Agent Model Customization**: Review and refine the `FrankaDeterministicPolicy` and `FrankaValue` network architectures in `source/SummerProj/tasks/direct/franka_pap/models/custom_diol_net.py` to ensure they are suitable for the low-level control task (delta end-effector pose and impedance gains).
+2.  **HRLTrainer Refinement**: Verify and debug the `HRLTrainer` (`source/SummerProj/tasks/direct/franka_pap/trainers/trainer.py`) to ensure:
+    -   Correct handling of transitions for both high-level and low-level agents.
+    -   Proper implementation and application of Hindsight Experience Replay (HER) for the low-level agent.
+    -   Correct training calls for both agents.
+3.  **Configuration Review**: Double-check `skrl_custom_diol_cfg.yaml` for correct hyperparameter settings for both DIOL and DDPG agents, especially regarding replay buffer sizes, learning rates, and target network update frequencies.
+4.  **Initial Training Run & Debugging**: Perform an initial training run and closely monitor logs and agent behavior to identify any immediate issues or unexpected behaviors. Focus on:
+    -   Whether the low-level agent is receiving and attempting to achieve sub-goals.
+    -   The rewards received by both agents.
+    -   The loss values during training.
+5.  **Performance Evaluation**: Once the training runs without errors, begin evaluating the performance of the HRL system, focusing on the robot's ability to successfully complete the pick-and-place task.
+---

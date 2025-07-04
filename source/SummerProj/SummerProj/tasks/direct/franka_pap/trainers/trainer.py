@@ -1,4 +1,5 @@
 
+import numpy as np
 import copy
 from typing import List, Optional, Union, Dict, Any
 import tqdm
@@ -19,7 +20,17 @@ HRL_TRAINER_DEFAULT_CONFIG = {
     # HRL에 특화된 설정 추가
     "cycle_interval": 50,         # 학습을 수행할 cycle 간격         
     "epoch_interval": 1,          # 평가를 수행할 Epoch 간격
-    "episode_interval": 16        # 하나의 Cycle을 구성하는 에피소드 간격
+    "episode_interval": 16,        # 하나의 Cycle을 구성하는 에피소드 간격
+
+    # AAES (Auto-Adjusting Exploration Strategy) 설정
+    "aaes_kwargs": {
+        "min_std": 0.05,
+        "max_std": 1.0,
+        "min_uniform": 0.05,
+        "max_uniform": 0.95,
+        "reduction_factor_noise": 0.9,
+        "reduction_factor_uniform": 0.6,
+    }
 }
 
 class HRLTrainer(Trainer):
@@ -43,11 +54,17 @@ class HRLTrainer(Trainer):
         if self.high_level_agent is None or self.low_level_agent is None:
             raise ValueError("The 'agents' dictionary must contain 'high_level' and 'low_level' keys.")
 
-        # 인스턴스 변수로 파라미터 저장 (train 루프에서 쉽게 사용하기 위함)
+        # Training 파라미터 (train 루프에서 쉽게 사용하기 위함)
         self.timesteps = self.cfg["timesteps"]
         self.epoch_interval = self.cfg["epoch_interval"]
         self.episode_interval = self.cfg["episode_interval"]
         self.cycle_interval = self.cfg["cycle_interval"]
+
+        # AAES 파라미터
+        self.aaes_params = self.cfg.get("aaes_kwargs", {})
+        self.current_noise_std = self.aaes_params.get("max_std")
+        self.current_random_action_ratio = self.aaes_params.get("max_uniform")
+        self.action_space = self.low_level_agent.action_space
 
         # 학습 로직 관련 변수
         self.current_high_level_action = torch.zeros((self.env.num_envs, 1), dtype=torch.long, device=self.env.device)
@@ -95,19 +112,20 @@ class HRLTrainer(Trainer):
 
     def train(self) -> None:
         print("[HRLTrainer] Starting HRL Training...")
-
         self.high_level_agent.set_running_mode("train")
         self.low_level_agent.set_running_mode("train")
 
         obs, info = self.env.reset()
 
         # High-Level Goal
+        self.high_level_demo = self._sample_new_high_level_demo()
         self.high_level_goal = self._sample_new_high_level_goal()
         self.env._unwrapped.set_high_level_goal(self.high_level_goal)
 
         # Initialization Count for Loop
         self.episode_count = 0
         self.cycle_count = 0
+        self.epoch_count = 0
 
         progress_bar = tqdm.tqdm(range(self.initial_timestep, self.timesteps), 
                                  disable=self.disable_progressbar, 
@@ -172,58 +190,101 @@ class HRLTrainer(Trainer):
                 self.needs_new_high_level_action = True
 
             # ===== 주기적인 학습 및 평가 =====
-            # [Cycle 종료] 일정 수의 에피소드가 끝나면(Cycle), 두 에이전트 모두 학습
-            if self.episode_counter > 0 and self.episode_counter % self.cfg["episode_interval"] == 0:
-                self.cycle_counter += 1
-                self.high_level_agent.train()
-                self.low_level_agent.train()
-                self.episode_counter = 0 # 사이클 내 에피소드 카운터 리셋
+            # [Per Cycle] 두 에이전트 모두 학습
+            if self.episode_count > 0 and self.episode_count % self.cfg["episode_interval"] == 0:
+                self.cycle_count += 1
+                self.high_level_agent._update()
+                self.low_level_agent._update()
+                self.episode_count = 0 # 사이클 내 에피소드 카운터 리셋
             
-            # [Epoch 종료] 일정 수의 사이클이 끝나면, 성능 평가 및 AAES 업데이트
-            if self.cycle_counter > 0 and self.cycle_counter % self.cfg["cycle_interval"] == 0:
+            # [Per Epoch] 성능 평가 및 AAES 업데이트
+            if self.cycle_count > 0 and self.cycle_count % self.cfg["cycle_interval"] == 0:
+                self.epoch_count += 1
                 success_rate = self.eval()
                 self._update_aaes_params(success_rate)
-                self.cycle_counter = 0
+                self.cycle_count = 0
 
 
-            # ===== 주기적인 로깅 및 체크포인트 =====
-            if timestep > 1 and self.high_level_agent.checkpoint_interval > 0 and not timestep % self.high_level_agent.checkpoint_interval:
-                pass
-
+            # ===== Checkpoint Generation & Logging : Post Interaction =====
+            self.high_level_agent.post_interaction(timestep, self.timesteps)
+            self.low_level_agent.post_interaction(timestep, self.timesteps)
 
 
             # =========== Update Observation to Next =============
             obs = next_obs_dict
 
-
     
-    def eval(self):
-        return super().eval()
+    def eval(self, eval_episodes: int = 100):
+        print(f"[HRLTrainer] Starting HRL Evaluation at [Epoch {self.epoch_count}]...")
+        self.high_level_agent.set_running_mode("eval")
+        self.low_level_agent.set_running_mode("eval")
+
+        successes = []
+        for _ in range(eval_episodes):
+            current_demo_step = 0
+            needs_new_high_level_action = True
+            obs, info = self.env.reset()
+            high_level_demo = self._sample_new_high_level_demo()
+            high_level_goal = self._sample_new_high_level_goal()
+            self.env._unwrapped.set_high_level_goal(high_level_goal)
+            
+            # High-Level (=Episode) Loop
+            for _ in range(self.env._unwrapped.max_episode_length):
+                # 새로운 고수준 행동이 필요할 때만 결정
+                if needs_new_high_level_action:
+                    high_level_action = self._get_demonstration_action(current_demo_step, high_level_demo)
+                    current_demo_step += 1
+                    
+                    # 매핑 및 저수준 목표 설정
+                    low_level_goal = self._map_goal(high_level_action, obs["policy"]["observation"])
+                    self.env._unwrapped.set_low_level_goals(low_level_goal)
+                    
+                    needs_new_high_level_action = False
+
+                # 저수준 행동 결정
+                low_level_action, _, _ = self.low_level_agent.act(obs, timestep=0, timesteps=0)
+                
+                # 환경 스텝
+                obs, _, terminated, truncated, info = self.env.step(low_level_action)
+                
+                # 단일 환경을 기준으로 종료 여부 판단
+                if terminated[0].item() or truncated[0].item():
+                    break
+
+                # 단일 환경이 옵션을 완료했다면, 다음 스텝에 새로운 고수준 행동이 필요함
+                if info.get("option_terminated")[0].item():
+                    needs_new_high_level_action = True
+
+            # 최종적으로 0번 환경이 성공적으로 끝났는지(terminated)로 성공 여부 판단
+            successes.append(1.0 if terminated[0].item() else 0.0)
+
+        self.high_level_agent.set_running_mode("train")
+        self.low_level_agent.set_running_mode("train")
+
+        avg_success_rate = np.mean(successes)
+        print(f"[HRLTrainer] Evaluation finished at [Epoch {self.epoch_count}]. Average Success Rate: {avg_success_rate:.2f}")
     
-
-
-
+        return avg_success_rate
 
 
     # ====================================================================== #
     # ======================= Auxillary Function =========================== #
     # ====================================================================== #
-    def _sample_new_high_level_goal(self) -> torch.Tensor:
+    def _sample_new_high_level_demo(self) -> torch.Tensor:
         """
-            사전에 정의된 최종 목표 목록에서 새로운 목표를 샘플링합니다.
+            사전에 정의된 최종 목표 목록에서 새로운 목표를 샘플링.
         """
-        ####### 실제로는 이 Pre-defined된 목표값들을 cfg 등에서 불러와야 합니다. #####
-        possible_goals = [
-            torch.tensor([1, 1, 0, 0, ...], device=self.env.device),
-            torch.tensor([0, 0, 1, 1, ...], device=self.env.device) 
-        ]
-        
-        # 모든 환경에 동일한 목표를 무작위로 샘플링하여 할당합니다.
-        goal_index = torch.randint(0, len(possible_goals), (1,)).item()
-        selected_goal = possible_goals[goal_index]
+        # Pre-defined된 Abstract Demonstration을 Task-Specific Configuration에서 호출
+        # 규칙 : 0부터 수행해야 하는 Ground Truth Sequence에 따라 +1 간격으로 정의되어 있음.
+        _demo = torch.linspace(0, self.env._unwrapped.cfg.high_level_goal_dim, 1)
         
         # num_envs 차원으로 확장하여 반환
-        return selected_goal.repeat(self.env.num_envs, 1)
+        return _demo.repeat(self.env.num_envs, 1)
+    
+
+    def _sample_new_high_level_goal(self) -> torch.Tensor:
+
+        return self.env._unwrapped.set_high_level_goal()
 
 
     def _start_high_level_transition(self, obs: Dict, high_level_action: torch.Tensor) -> None:
@@ -269,8 +330,8 @@ class HRLTrainer(Trainer):
                                                  actions=actions,
                                                  rewards=rewards,
                                                  next_states=next_states_to_store,
-                                                 terminated=terminated,
-                                                 truncated=truncated)
+                                                 terminated=infos.get("option_terminated"),
+                                                 truncated=torch.zeros_like(infos.get("option_terminated")))
 
     
     def _store_to_episode_buffer(self, 
@@ -282,8 +343,8 @@ class HRLTrainer(Trainer):
                                  truncated: torch.Tensor) -> None:
     
         """
-            한 타임스텝의 저수준 경험을 에피소드 임시 버퍼에 저장합니다.
-            HER을 적용하기 전에 한 에피소드의 모든 데이터를 수집하는 역할을 합니다.
+            한 타임스텝의 저수준 경험을 에피소드 임시 버퍼에 저장.
+            HER을 적용하기 전에 한 에피소드의 모든 데이터를 수집하는 역할.
         """
         step_idx = self.episode_step_ptr[0]
 
@@ -305,8 +366,8 @@ class HRLTrainer(Trainer):
         
         """
             에피소드가 종료된 환경들에 대해 HER을 적용하고, 
-            원본 및 증강된 경험을 저수준 리플레이 버퍼에 저장합니다.
-            여기서, 종료된 환경들에 대한 개별 처리를 통해 각자의 길이를 고려한 HER을 적용합니다.
+            원본 및 증강된 경험을 저수준 리플레이 버퍼에 저장.
+            여기서, 종료된 환경들에 대한 개별 처리를 통해 각자의 길이를 고려한 HER을 적용.
         """
         # HER 관련 파라미터 가져오기
         her_cfg = self.cfg.get("her_kwargs", {})
@@ -360,7 +421,7 @@ class HRLTrainer(Trainer):
                     synthetic_next_obs = copy.deepcopy(next_obs)
                     synthetic_obs["policy"]["desired_goal"] = new_desired_goal
                     synthetic_next_obs["policy"]["desired_goal"] = new_desired_goal
-
+                    
                     batch_to_store["states"].append(synthetic_obs.unsqueeze(0))
                     batch_to_store["actions"].append(action.unsqueeze(0))
                     batch_to_store["rewards"].append(new_reward.unsqueeze(0))
@@ -395,6 +456,9 @@ class HRLTrainer(Trainer):
                             slice_batch[name] = value[i:end_index]
 
                     self.low_level_agent.memory.add_samples(**slice_batch)
+            
+            # Episode Buffer Clear
+            self.episode_buffer.clear()
 
 
     
@@ -408,17 +472,45 @@ class HRLTrainer(Trainer):
         ), 0.0, -1.0)
 
         return reward
-    
 
-    def _apply_aaes(self):
-        pass
 
     def _map_goal(self, high_level_action: torch.Tensor, current_obs: dict) -> torch.Tensor:
         """
-            실제 매핑 로직을 환경 객체에 위임하고, 자신은 호출만 수행합니다.
-            ._unwrapped를 사용하여 래퍼를 우회하고 환경의 원본 메소드에 접근합니다.
+            실제 매핑 로직을 환경 객체에 위임하고, 자신은 호출만 수행.
+            ._unwrapped를 사용하여 래퍼를 우회하고 환경의 원본 메소드에 접근.
         """
         return self.env._unwrapped._map_high_level_action_to_low_level_goal(high_level_action, current_obs)
 
-    def _update_aaes_params(self):
-        pass
+
+    def _apply_aaes(self, action: torch.Tensor) -> torch.Tensor:
+        """
+            결정론적 액션에 AAES 노이즈를 적용.
+        """
+        # Action From policy vs Action From Uniform Disctribution 결정
+        # We use tanh activation in policy network. So, action range is [-1, 1]
+        if torch.rand(1).item() < self.current_random_action_ratio:
+            low = torch.tensor(-1, device=self.env.device)
+            high = torch.tensor(1, device=self.env.device)
+            action = torch.rand_like(action) * (high - low) + low
+
+        # 가우시안 노이즈 생성
+        noise = torch.normal(mean=0, std=self.current_noise_std, size=action.shape, device=self.env.device)
+        
+        # 액션에 노이즈 추가
+        noisy_action = action + noise
+        
+        return noisy_action
+
+
+    def _update_aaes_params(self, success_rate: float) -> None:
+        """
+            태스크 성공률에 기반하여 AAES 파라미터를 업데이트.
+        """
+        self.current_random_action_ratio = self.aaes_params.get("reduction_factor_uniform") * (1-success_rate)
+        self.current_noise_std = self.aaes_params.get("reduction_factor_noise") * (1-success_rate)
+
+        # 정의된 범위를 벗어나지 않도록 각 파라미터를 클리핑
+        self.current_random_action_ratio = max(self.aaes_params.get("min_uniform"),
+                                               min(self.current_random_action_ratio, self.aaes_params.get("max_uniform")))
+        self.current_noise_std = max(self.aaes_params.get("min_std"), 
+                                   min(self.current_noise_std, self.aaes_params.get("max_std")))
