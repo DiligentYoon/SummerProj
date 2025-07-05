@@ -30,19 +30,21 @@ class AISLDIOLRunner(Runner):
 
         # ==== 각 Level에 맞는 Action/Observation Space 정의 ====
         # High-Level 정책(DIOL)을 위한 공간
+        # observation : 공통 state
+        # desired_goal : high-level goal
         # High-Level Policy : \pi_{g}^H (a^H | s, g^H)
         # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
         single_high_level_observation_space = gym.spaces.Dict({
             "observation": env._unwrapped.single_observation_space["policy"]["observation"],
             "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
         })
-        single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_goal_dim)
+        single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
         high_level_observation_space = gym.vector.utils.batch_space(single_high_level_observation_space, self._env.num_envs)
         high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
 
 
-        # Low-Level 정책(DDPG)을 위한 공간
-        low_level_observation_space = env._unwrapped.observation_space 
+        # Low-Level 정책(DDPG)을 위한 공간은 환경에서 이미 정의 : 값만 가져오기
+        low_level_observation_space = env._unwrapped.observation_space
         low_level_action_space = env._unwrapped.action_space
 
 
@@ -82,8 +84,12 @@ class AISLDIOLRunner(Runner):
         for role, model_config in low_level_models_cfg.items():
             # Hydra를 사용하여 커스텀 모델 인스턴스화
             if "_target_" in model_config:
-                model_config["observation_space"] = low_level_observation_space
-                model_config["action_space"] = low_level_action_space
+                if role == "policy":
+                    model_config["observation_space"] = low_level_observation_space[role]
+                    model_config["action_space"] = low_level_action_space[role]
+                else:
+                    model_config["observation_space"] = low_level_observation_space["critic"]
+                    model_config["action_space"] = low_level_action_space["critic"]
                 model_config["device"] = device
                 models["low_level"][role] = hydra.utils.instantiate(model_config)
                 print(f"  - Instantiated low-level model for role: '{role}'")

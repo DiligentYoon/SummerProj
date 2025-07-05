@@ -28,7 +28,13 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
             "policy": {
                 "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
                 "achieved_goal": torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device),
-                "desired_goal": torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device)
+                "final_goal": torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), device=self.device),
+                "sub_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
+            },
+            "critic":{
+                "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
+                "sub_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device),
+                "taken_action": torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
             }
         }
 
@@ -184,9 +190,9 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
 
         # === 저 수준 (Low-Level)에 대한 보상 계산 ===
         loc_to_subgoal = torch.norm(self.obs_buf["policy"]["achieved_goal"][:, :3] - \
-                                    self.obs_buf["policy"]["desired_goal"][:, :3], dim=1)
+                                    self.obs_buf["policy"]["sub_goal"][:, :3], dim=1)
         rot_to_subgoal = quat_error_magnitude(self.obs_buf["policy"]["achieved_goal"][:, 3:7], 
-                                              self.obs_buf["policy"]["desired_goal"][:, 3:7])
+                                              self.obs_buf["policy"]["sub_goal"][:, 3:7])
 
         reward_low = torch.where(torch.logical_and(
             loc_to_subgoal < self.cfg.low_level_loc_threshold,
@@ -250,13 +256,21 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
             ), dim=1
         )
         
-        obs_buf = {
+        obs_buf_1 = {
             "observation": low_level_obs,
             "achieved_goal": achieved_goal,
-            "desired_goal": self.low_level_goals
+            "final_goal": self.high_level_goals,
+            "sub_goal": self.low_level_goals,
         }
 
-        self.obs_buf["policy"] = obs_buf
+        obs_buf_2 = {
+            "observation": low_level_obs,
+            "sub_goal": self.low_level_goals,
+            "taken_action": self.actions
+        }
+
+        self.obs_buf["policy"] = obs_buf_1
+        self.obs_buf["critic"] = obs_buf_2
 
         return self.obs_buf
 
@@ -358,7 +372,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
     def _map_high_level_action_to_low_level_goal(self, high_level_action: torch.Tensor, current_obs: dict) -> torch.Tensor:
         """Mapping a discrete high-level action to a continuous low-level goal state."""
         # Initialize low-level goals with current achieved goals as a baseline
-        low_level_goals = current_obs["policy"]["achieved_goal"].clone()
+        low_level_goals = current_obs["policy"]["sub_goal"].clone()
         
         # Get current object and final goal positions from the environment state
         object_pos_w = self._object.data.root_state_w[:, :7]

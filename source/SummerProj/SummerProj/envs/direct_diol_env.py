@@ -62,24 +62,26 @@ class DirectDIOL(DirectRLEnv):
 
         # ============== Low-Level spaces ===============
         # set up spaces
-        self.single_action_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
+        self.single_action_space = gym.spaces.Dict({
+            "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
+            "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
+        })
         self.single_observation_space = gym.spaces.Dict()
         self.single_observation_space["observation"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,))
-        self.single_observation_space["achieved_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.achieved_goal_dim,))
+        # self.single_observation_space["achieved_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.achieved_goal_dim,))
         self.single_observation_space["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
         self.single_observation_space = gym.spaces.Dict({
             "policy": self.single_observation_space
         })
+        self.single_observation_space["critic"] = gym.spaces.Dict()
+        self.single_observation_space["critic"]["observation"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,))
+        self.single_observation_space["critic"]["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
+        self.single_observation_space["critic"]["taken_action"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
+
 
         # set up batched spaces
         self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
         self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
-
-        # optional state space for asymmetric actor-critic architectures
-        self.state_space = None
-        if self.cfg.state_space:
-            self.single_observation_space["critic"] = spec_to_gym_space(self.cfg.state_space)
-            self.state_space = gym.vector.utils.batch_space(self.single_observation_space["critic"], self.num_envs)
 
         # instantiate actions (needed for tasks for which the observations computation is dependent on the actions)
         self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)

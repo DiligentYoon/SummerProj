@@ -138,13 +138,13 @@ class HRLTrainer(Trainer):
 
             # ====== Hierarchical Control Logic =======
             if self.needs_new_high_level_action:
-                current_state = obs["policy"]["observation"]
-
+                # High-Level state : (s, g^H)
+                high_level_state = torch.cat((obs["policy"]["observation"], obs["policy"]["final_goal"]), dim=1)
                 # High-Level Agent action : Discrete Action from DIOL Agent
-                high_level_action, _, _ = self.high_level_agent.act(current_state, timestep=timestep, timesteps=self.timesteps)
+                high_level_action, _, _ = self.high_level_agent.act(high_level_state, timestep=timestep, timesteps=self.timesteps)
 
             # [Mapping Function] : From High-Level Action to Low-Level Goal State
-            low_level_goal = self._map_goal(high_level_action, current_state)
+            low_level_goal = self._map_goal(high_level_action, obs)
             self.env._unwrapped.set_low_level_goals(low_level_goal)
 
             self.needs_new_high_level_action = False
@@ -153,7 +153,8 @@ class HRLTrainer(Trainer):
 
 
             # ====== Low-Level action with AAES Logic ======
-            low_level_action = self.low_level_agent.act(obs, timestep=timestep, timesteps=self.timesteps)[0]
+            low_level_state = torch.cat((obs["policy"]["observation"], obs["policy"]["sub_goal"]), dim=1)
+            low_level_action = self.low_level_agent.act(low_level_state, timestep=timestep, timesteps=self.timesteps)[0]
             action_to_env = self._apply_aaes(low_level_action)
 
             # Environment step
@@ -236,13 +237,14 @@ class HRLTrainer(Trainer):
                     current_demo_step += 1
                     
                     # 매핑 및 저수준 목표 설정
-                    low_level_goal = self._map_goal(high_level_action, obs["policy"]["observation"])
+                    low_level_goal = self._map_goal(high_level_action, obs)
                     self.env._unwrapped.set_low_level_goals(low_level_goal)
                     
                     needs_new_high_level_action = False
 
                 # 저수준 행동 결정
-                low_level_action, _, _ = self.low_level_agent.act(obs, timestep=0, timesteps=0)
+                low_level_state = torch.cat((obs["policy"]["observation"], obs["policy"]["sub_goal"]), dim=1)
+                low_level_action, _, _ = self.low_level_agent.act(low_level_state, timestep=0, timesteps=0)
                 
                 # 환경 스텝
                 obs, _, terminated, truncated, info = self.env.step(low_level_action)
@@ -310,11 +312,11 @@ class HRLTrainer(Trainer):
         """
         states_to_store = {
             "observation": obs["policy"]["observation"],
-            "desired_goal": self.high_level_goal
+            "desired_goal": obs["policy"]["final_goal"]
         }
         next_states_to_store = {
             "observation": next_obs["policy"]["observation"],
-            "desired_goal": self.high_level_goal
+            "desired_goal": obs["policy"]["final_goal"]
         }
 
         self.high_level_agent.record_transition(states=obs["policy"]["observation"],

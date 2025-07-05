@@ -15,8 +15,8 @@ class FrankaDeterministicPolicy(DeterministicMixin, Model):
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions, device)
 
-        obs_dim = observation_space["policy"]["observation"].shape[0]
-        goal_dim = observation_space["policy"]["desired_goal"].shape[0]
+        obs_dim = observation_space["observation"].shape[0]
+        goal_dim = observation_space["desired_goal"].shape[0]
         in_features = obs_dim + goal_dim
         
         # Backbone
@@ -56,13 +56,12 @@ class FrankaValue(Model):
         
         Model.__init__(self, observation_space, action_space, device)
         
-
-        obs_dim = observation_space["policy"]["observation"].shape[0]
-        goal_dim = observation_space["policy"]["desired_goal"].shape[0]
-        action_dim = action_space.shape[0]
+        obs_dim = observation_space["observation"].shape[0]
+        goal_dim = observation_space["desired_goal"].shape[0]
+        action_dim = observation_space["taken_action"].shape[0]
 
         # Backbone
-        in_features_encoder = obs_dim + goal_dim
+        in_features_encoder = obs_dim + goal_dim + action_dim
         encoder_layers = []
         for out_features in encoder_features:
             encoder_layers.append(nn.Linear(in_features_encoder, out_features))
@@ -81,8 +80,8 @@ class FrankaValue(Model):
         self.value_head = nn.Linear(in_features_value, 1)
 
     def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
-        obs = inputs["states"]["policy"]["observation"]
-        goal = inputs["states"]["policy"]["desired_goal"]
+        obs = inputs["states"]["critic"]["observation"]
+        goal = inputs["states"]["critic"]["desired_goal"]
         actions = inputs["taken_actions"]
         x = self.encoder(torch.cat((obs, goal), dim=-1))
         v = self.value_branch(torch.cat((x, actions), dim=-1))
@@ -113,7 +112,6 @@ class FrankaQNetwork(Model):
     
     def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
         # DIOL 에이전트의 관측: Dict 타입에서 추출
-        states = inputs["states"]["observation"]
-        goals = inputs["states"]["desired_goal"]
+        input = inputs["states"]
         # 네트워크를 통과시켜 모든 행동에 대한 Q-value들을 반환합니다.
-        return self.net(torch.cat((states, goals), dim=1)), {}
+        return self.net(input), {}

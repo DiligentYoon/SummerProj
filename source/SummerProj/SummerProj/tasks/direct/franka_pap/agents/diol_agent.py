@@ -11,6 +11,7 @@ from torch.optim import Adam
 
 from skrl.agents.torch import Agent
 from skrl.memories.torch import Memory
+from .replay_buffer import HighLevelHindsightReplayBuffer
 from skrl.models.torch import Model
 
 # DIOLAgent를 위한 기본 설정값
@@ -33,18 +34,21 @@ DIOL_DEFAULT_CONFIG = {
 class DIOLAgent(Agent):
     def __init__(self,
                  models: Dict[str, Model],
-                 memory: Memory,
+                 memory: HighLevelHindsightReplayBuffer,
                  observation_space: gym.Space,
                  action_space: gym.Space,
                  device: Union[str, torch.device],
                  cfg: Mapping[str, Any]) -> None:
+        
+        _cfg = copy.deepcopy(DIOL_DEFAULT_CONFIG)
+        _cfg.update(cfg if cfg is not None else {})
 
         super().__init__(models=models,
                          memory=memory,
                          observation_space=observation_space,
                          action_space=action_space,
                          device=device,
-                         cfg=DIOL_DEFAULT_CONFIG)
+                         cfg=_cfg)
         
 
         self.cfg.update(cfg)
@@ -67,6 +71,7 @@ class DIOLAgent(Agent):
 
     def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> tuple[torch.Tensor, None, dict]:
         """Epsilon-greedy 전략에 따라 행동을 결정"""
+
         # 엡실론 값 업데이트
         self._exploration_epsilon = max(self.cfg["exploration"]["final_epsilon"], self._exploration_epsilon - self._epsilon_decay)
         
@@ -91,7 +96,6 @@ class DIOLAgent(Agent):
                           **kwargs) -> None:
         """
             HRL을 위한 특별한 전환(transition)을 메모리에 기록
-            'option_terminated' 플래그를 infos에서 가져와 버퍼에 함께 저장
         """
         if self.write_interval > 0:
             # compute the cumulative sum of the rewards and timesteps
@@ -102,7 +106,7 @@ class DIOLAgent(Agent):
             self._cumulative_rewards.add_(rewards)
             self._cumulative_timesteps.add_(1)
 
-            # check ended episodes
+            # check ended episodes : 반드시 High-Level 기준으로 측정
             finished_episodes = (terminated + truncated).nonzero(as_tuple=False)
             if finished_episodes.numel():
 
