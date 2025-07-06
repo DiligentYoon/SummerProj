@@ -1,5 +1,5 @@
 # File: source/SummerProj/SummerProj/tasks/direct/franka_pap/agents/diol_agent.py
-from typing import Union, Dict, Any, Mapping
+from typing import Any, Mapping, Optional, Tuple, Union, Dict
 
 import os
 import copy
@@ -7,26 +7,52 @@ import numpy as np
 import torch
 import torch.nn as nn
 import gymnasium as gym
-from torch.optim import Adam
+from packaging import version
 
+from skrl import config, logger
 from skrl.agents.torch import Agent
-from skrl.memories.torch import Memory
-from .replay_buffer import HighLevelHindsightReplayBuffer
 from skrl.models.torch import Model
+
+from .replay_buffer import HighLevelHindSightReplayBuffer
 
 # DIOLAgent를 위한 기본 설정값
 DIOL_DEFAULT_CONFIG = {
-    "discount_factor": 0.99,        # 감가율 (gamma)
-    "learning_rate": 1e-4,          # 학습률
-    "batch_size": 64,               # 미니배치 크기
-    "polyak": 0.005,                # 타겟 네트워크 소프트 업데이트 계수 (tau)
-    "learning_starts": 1000,        # 학습 시작 전 최소 경험 수
-    "update_interval": 1,           # 몇 스텝마다 학습할지
+    "gradient_steps": 1,            # gradient steps
+    "batch_size": 64,               # training batch size
+
+    "discount_factor": 0.99,        # discount factor (gamma)
+    "polyak": 0.005,                # soft update hyperparameter (tau)
+
+    "learning_rate": 1e-4,                  # learning rate
+    "learning_rate_scheduler": None,        # learning rate scheduler class (see torch.optim.lr_scheduler)
+    "learning_rate_scheduler_kwargs": {},   # learning rate scheduler's kwargs (e.g. {"step_size": 1e-3})
+
+    "random_timesteps": 0,          # 랜덤 탐험 스텝 수
+    "learning_starts": 0,           # 학습 시작 전 최소 경험 수
+
+    "update_interval": 1,           # 네트워크 학습 주기
+    "target_update_interval": 10,   # 타겟 네트워크 학습 주기
+
     "exploration": {
         "initial_epsilon": 1.0,     # 초기 탐험율 (epsilon-greedy)
         "final_epsilon": 0.01,      # 최종 탐험율
         "timesteps": 100000,        # 엡실론이 최종값까지 감소하는 데 걸리는 스텝 수
     },
+
+    "state_preprocessor": None,             # state preprocessor class (see skrl.resources.preprocessors)
+    "state_preprocessor_kwargs": {},        # state preprocessor's kwargs (e.g. {"size": env.observation_space})
+
+    "experiment": {
+        "directory": "",            # experiment's parent directory
+        "experiment_name": "",      # experiment name
+        "write_interval": "auto",   # TensorBoard writing interval (timesteps)
+
+        "checkpoint_interval": "auto",      # interval for checkpoints (timesteps)
+        "store_separately": False,          # whether to store checkpoints separately
+
+        "wandb": False,             # whether to use Weights & Biases
+        "wandb_kwargs": {}          # wandb kwargs (see https://docs.wandb.ai/ref/python/init)
+    }
 }
 
 # DIOL Agent 클래스를 정의.
@@ -34,7 +60,7 @@ DIOL_DEFAULT_CONFIG = {
 class DIOLAgent(Agent):
     def __init__(self,
                  models: Dict[str, Model],
-                 memory: HighLevelHindsightReplayBuffer,
+                 memory: HighLevelHindSightReplayBuffer,
                  observation_space: gym.Space,
                  action_space: gym.Space,
                  device: Union[str, torch.device],
@@ -50,24 +76,94 @@ class DIOLAgent(Agent):
                          device=device,
                          cfg=_cfg)
         
-
         self.cfg.update(cfg)
 
         self.q_network = self.models["q_network"]
         self.target_q_network = self.models["target_q_network"]
 
-        # 타겟 네트워크의 파라미터를 Q-네트워크와 동일하게 초기화
-        self.target_q_network.load_state_dict(self.q_network.state_dict())
         # 타겟 네트워크는 학습되지 않도록 설정 : Soft 업데이트만 수행함.
-        for param in self.target_q_network.parameters():
-            param.requires_grad = False
+        if config.torch.is_distributed:
+            logger.info(f"Broadcasting models' parameters")
+            if self.q_network is not None:
+                self.q_network.broadcast_parameters()
 
-        # 옵티마이저 설정
-        self.optimizer = Adam(self.q_network.parameters(), lr=self.cfg["learning_rate"])
+        if self.target_q_network is not None:
+            # freeze target networks with respect to optimizers (update via .update_parameters())
+            self.target_q_network.freeze_parameters(True)
 
-        # Epsilon-greedy Exploration 설정
-        self._exploration_epsilon = self.cfg["exploration"]["initial_epsilon"]
-        self._epsilon_decay = (self.cfg["exploration"]["initial_epsilon"] - self.cfg["exploration"]["final_epsilon"]) / self.cfg["exploration"]["timesteps"]
+            # update target networks (hard update)
+            self.target_q_network.update_parameters(self.q_network, polyak=1)
+
+        # config 기반 컴포넌트 설정
+        self.checkpoint_modules["q_network"] = self.q_network
+        self.checkpoint_modules["target_q_network"] = self.target_q_network
+        
+
+        # configuration
+        self._gradient_steps = self.cfg["gradient_steps"]
+        self._batch_size = self.cfg["batch_size"]
+
+        self._discount_factor = self.cfg["discount_factor"]
+        self._polyak = self.cfg["polyak"]
+
+        self._learning_rate = self.cfg["learning_rate"]
+        self._learning_rate_scheduler = self.cfg["learning_rate_scheduler"]
+
+        self._state_preprocessor = self.cfg["state_preprocessor"]
+
+        self._random_timesteps = self.cfg["random_timesteps"]
+        self._learning_starts = self.cfg["learning_starts"]
+
+        self._update_interval = self.cfg["update_interval"]
+        self._target_update_interval = self.cfg["target_update_interval"]
+
+        self._exploration_initial_epsilon = self.cfg["exploration"]["initial_epsilon"]
+        self._exploration_final_epsilon = self.cfg["exploration"]["final_epsilon"]
+        self._exploration_timesteps = self.cfg["exploration"]["timesteps"]
+
+        self._rewards_shaper = self.cfg["rewards_shaper"]
+
+        self._mixed_precision = self.cfg["mixed_precision"]
+
+        # set up automatic mixed precision
+        self._device_type = torch.device(device).type
+        if version.parse(torch.__version__) >= version.parse("2.4"):
+            self.scaler = torch.amp.GradScaler(device=self._device_type, enabled=self._mixed_precision)
+        else:
+            self.scaler = torch.cuda.amp.GradScaler(enabled=self._mixed_precision)
+
+        # set up optimizer and learning rate scheduler
+        if self.q_network is not None:
+            self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=self._learning_rate)
+            if self._learning_rate_scheduler is not None:
+                self.scheduler = self._learning_rate_scheduler(
+                    self.optimizer, **self.cfg["learning_rate_scheduler_kwargs"]
+                )
+
+            self.checkpoint_modules["optimizer"] = self.optimizer
+
+        # set up preprocessors
+        if self._state_preprocessor:
+            self._state_preprocessor = self._state_preprocessor(**self.cfg["state_preprocessor_kwargs"])
+            self.checkpoint_modules["state_preprocessor"] = self._state_preprocessor
+        else:
+            self._state_preprocessor = self._empty_preprocessor
+        
+        self._tensors_names = []
+    
+    def init(self, trainer_cfg: Optional[Mapping[str, Any]] = None) -> None:
+        """Initialize the agent"""
+        super().init(trainer_cfg=trainer_cfg)
+
+        # create tensors in memory
+        if self.memory is not None:
+            self.memory.create_tensor(name="states", size=self.observation_space, dtype=torch.float32)
+            self.memory.create_tensor(name="next_states", size=self.observation_space, dtype=torch.float32)
+            self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.int64)
+            self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32)
+            self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool)
+            self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool)
+
 
     def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> tuple[torch.Tensor, None, dict]:
         """Epsilon-greedy 전략에 따라 행동을 결정"""

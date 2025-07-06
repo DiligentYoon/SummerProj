@@ -1,185 +1,220 @@
-import random as R
-import numpy as np
+import torch
+import gymnasium
+from typing import List, Optional, Tuple, Union
+from skrl.memories.torch.base import Memory
 from copy import deepcopy as dcp
 
 
-def goal_distance_reward(goal_a, goal_b):
-    assert goal_a.shape == goal_b.shape
-    d = np.linalg.norm(goal_a - goal_b, axis=-1)
-    return -(d > 0.02).astype(np.float32)
+class EpisodeWiseReplayBuffer(Memory):
+
+    def __init__(
+        self,
+        memory_size: int,
+        num_envs: int = 1,
+        device: Optional[Union[str, torch.device]] = None,
+        export: bool = False,
+        export_format: str = "pt",
+        export_directory: str = "",
+    ) -> None:
+        super().__init__(memory_size, num_envs, device, export, export_format, export_directory)
+
+        self.memory_index = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.episode_lengths = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
 
-class EpisodeWiseReplayBuffer(object):
-    def __init__(self, capacity, tr_namedtuple, seed=0):
-        R.seed(seed)
-        self.capacity = capacity
-        self.memory = []
-        self.position = 0
-        self.episodes = []
-        self.ep_position = -1
-        self.Transition = tr_namedtuple
+    def add_samples(self, 
+                    states: torch.Tensor, 
+                    sub_goal: torch.Tensor, 
+                    action: torch.Tensor, 
+                    reward: torch.Tensor, 
+                    achieved_goal: torch.Tensor, 
+                    next_states: torch.Tensor, 
+                    terminated: torch.Tensor, 
+                    truncated: torch.Tensor) -> None:
+        """
+        한 타임스텝의 데이터를 에피소드 버퍼에 추가합니다.
 
-    def store_experience(self, new_episode=False, *args):
-        # $new_episode is a boolean value
-        if new_episode:
-            self.episodes.append([])
-            self.ep_position += 1
-        self.episodes[self.ep_position].append(self.Transition(*args))
+            입력 텐서들의 shape: (num_envs, feature_dim)
+        """
+        # shape: (num_envs,)
+        current_indices = self.memory_index
+        
+        # 병렬 환경의 인덱스를 나타내는 텐서를 생성합니다 (0, 1, 2, ..., num_envs-1)
+        env_indices = torch.arange(self.num_envs, device=self.device)
 
-    def store_episode(self):
-        if len(self.episodes) == 0:
-            return
-        for ep in self.episodes:
-            for n in range(len(ep)):
-                if len(self.memory) < self.capacity:
-                    self.memory.append(None)
-                self.memory[self.position] = ep[n]
-                self.position = (self.position + 1) % self.capacity
-        self.episodes.clear()
-        self.ep_position = -1
+        # 각 텐서의 (쓰기_인덱스, 환경_인덱스) 위치에 데이터를 저장합니다.
+        # 예: self.tensors["states"]의 [0, 0] 위치에 0번 환경의 0번째 스텝 데이터 저장
+        self.tensors["states"][current_indices, env_indices] = states
+        self.tensors["sub_goal"][current_indices, env_indices] = sub_goal
+        self.tensors["action"][current_indices, env_indices] = action
+        self.tensors["reward"][current_indices, env_indices] = reward
+        self.tensors["achieved_goal"][current_indices, env_indices] = achieved_goal
+        self.tensors["next_states"][current_indices, env_indices] = next_states
+        self.tensors["terminated"][current_indices, env_indices] = terminated
+        self.tensors["truncated"][current_indices, env_indices] = truncated
 
-    def sample(self, batch_size):
-        batch = R.sample(self.memory, batch_size)
-        return self.Transition(*zip(*batch))
+        # 다음 데이터를 저장하기 위해 메모리 인덱스를 1 증가시킵니다.
+        self.memory_index += 1
 
-    def __len__(self):
-        return len(self.memory)
-
-
-class LowLevelHindsightReplayBuffer(EpisodeWiseReplayBuffer):
-    def __init__(self, capacity, tr_namedtuple, sampled_goal_num=4, seed=0):
-        self.k = sampled_goal_num
-        EpisodeWiseReplayBuffer.__init__(self, capacity, tr_namedtuple, seed)
-
-    def modify_experiences(self):
-        if len(self.episodes) == 0:
-            return
-        for _ in range(len(self.episodes)):
-            ep = self.episodes[_]
-            goals = self.sample_achieved_goal_random(ep)
-            for n in range(len(goals[0])):
-                ind = goals[0][n]
-                goal = goals[1][n]
-                modified_ep = []
-
-                for tr in range(ind+1):
-                    s = ep[tr].state
-                    dg = goal
-                    a = ep[tr].action
-                    ns = ep[tr].next_state
-                    ag = ep[tr].achieved_goal
-                    r = ep[tr].reward
-                    d = ep[tr].done
-                    if tr == ind:
-                        modified_ep.append(self.Transition(s, dg, a, ns, ag, 0.0, 0))
-                    else:
-                        modified_ep.append(self.Transition(s, dg, a, ns, ag, r, d))
-                self.episodes.append(modified_ep)
-
-    def sample_achieved_goal_random(self, ep):
-        goals = [[], []]
-        for k_ in range(self.k):
-            done = False
-            count = 0
-            while not done:
-                count += 1
-                if count > len(ep):
-                    break
-                ind = R.randint(0, len(ep)-1)
-                goal = ep[ind].achieved_goal
-                if all(not np.array_equal(goal, g) for g in goals[1]):
-                    goals[1].append(goal)
-                    goals[0].append(ind)
-                    done = True
-        return goals
+        # 에피소드가 종료(terminated or truncated)된 환경이 있는지 확인합니다.
+        # dones의 shape: (num_envs,)
+        dones = (terminated | truncated).squeeze(-1)
+        
+        # 종료된 환경의 인덱스는 0으로 리셋하여 다음 에피소드를 처음부터 저장하도록 합니다.
+        if dones.any():
+            self.episode_lengths[dones] = self.memory_index[dones]
+        
+        # 버퍼의 최대 크기를 넘지 않도록 나머지 연산을 수행합니다 (안전장치).
+        self.memory_index[dones] = 0
+        self.memory_index %= self.memory_size
 
 
-class HACReplayBuffer(EpisodeWiseReplayBuffer):
-    def __init__(self, capacity, tr_namedtuple, sampled_goal_num=4, seed=0):
-        self.k = sampled_goal_num
-        EpisodeWiseReplayBuffer.__init__(self, capacity, tr_namedtuple, seed)
 
-    def modify_experiences(self):
-        if len(self.episodes) == 0:
-            return
-        hg_eps = self.hindsight_goal()
-        ha_eps = self.hingsight_action()
-        self.episodes.extend(hg_eps)
-        self.episodes.extend(ha_eps)
+class LowLevelHindSightReplayBuffer(Memory):
 
-    def hingsight_action(self):
-        modified_eps = []
-        for _ in range(len(self.episodes)):
-            ep = self.episodes[_]
-            modified_ep = []
-            for tr in range(len(ep)):
-                s = ep[tr].state
-                dg = ep[tr].desired_goal
-                # modify actions
-                a = ep[tr].achieved_goal
-                ns = ep[tr].next_state
-                ag = ep[tr].achieved_goal
-                r = ep[tr].reward
-                d = ep[tr].done
-                modified_ep.append(self.Transition(s, dg, a, ns, ag, r, d))
-            modified_eps.append(modified_ep)
-        return modified_eps
+    def __init__(
+        self,
+        memory_size: int,
+        device: Optional[Union[str, torch.device]] = None,
+        export: bool = False,
+        export_format: str = "pt",
+        export_directory: str = "",
+        k_num: int = 4,
+        strategy: str = "future"
+    ) -> None:
+        super().__init__(memory_size=memory_size, 
+                         num_envs=1, 
+                         device=device, 
+                         export=export, 
+                         export_format=export_format, 
+                         export_directory=export_directory)
+        self.k = k_num
+        self.strategy = strategy
+    
+    def add_samples(self, **tensors):
+        # 현재 배치 크기 확인
+        batch_size = next(iter(tensors.values())).shape[0]
+        
+        # 남은 공간 계산
+        space_left = self.memory_size - self.memory_index
+        
+        # 한 번에 추가할 수 있는 양과, 순환하여 추가할 양으로 나눔
+        fit_size = min(batch_size, space_left)
+        overflow_size = batch_size - fit_size
 
-    def hindsight_goal(self):
-        modified_eps = []
-        for _ in range(len(self.episodes)):
-            ep = self.episodes[_]
-            modified_ep = []
-            for tr in range(len(ep)):
-                s = ep[tr].state
-                dg = ep[-1].achieved_goal
-                a = ep[tr].achieved_goal
-                ns = ep[tr].next_state
-                ag = ep[tr].achieved_goal
-                r = goal_distance_reward(dg, ag)
-                d = ep[tr].done
-                modified_ep.append(self.Transition(s, dg, a, ns, ag, r, d))
-            modified_eps.append(modified_ep)
-        return modified_eps
+        # ======= 버퍼에 데이터 복사 ========
+        for name, tensor in tensors.items():
+            if name in self.tensors:
+                # 버퍼의 남은 공간에 데이터 채우기
+                #    (batch_size, feat) -> (batch_size, 1, feat)로 unsqueeze하여 저장
+                self.tensors[name][self.memory_index : self.memory_index + fit_size] = tensor[:fit_size].unsqueeze(1)
+
+                # 버퍼 용량을 넘는 데이터는 처음부터 덮어쓰기 (Queue형 버퍼)
+                if overflow_size > 0:
+                    self.tensors[name][0:overflow_size] = tensor[fit_size:].unsqueeze(1)
+        
+        # 포인터 업데이트
+        self.memory_index = (self.memory_index + batch_size) % self.memory_size
+        if not self.filled and (self.memory_index + batch_size >= self.memory_size):
+            self.filled = True
+    
+    def sample(self, batch_size: int, names: list[str]) -> tuple[list[torch.Tensor], torch.Tensor]:
+        """
+        버퍼에서 무작위로 transition 배치를 샘플링
+        
+        :param batch_size: 샘플링할 배치의 크기
+        :param names: 샘플링할 텐서의 이름 리스트
+        :return: 텐서 리스트와 샘플링된 인덱스
+        """
+        # 샘플링 가능한 최대 인덱스
+        max_index = self.memory_size if self.filled else self.memory_index
+        if max_index == 0:
+            return [torch.empty(0) for _ in names], torch.empty(0)
+            
+        # batch_size 만큼의 랜덤 인덱스 생성
+        indexes = torch.randint(0, max_index, (batch_size,), device=self.device)
+        
+        # 해당 인덱스의 데이터를 가져와서 리스트에 담음
+        sampled_tensors = []
+        for name in names:
+            # (batch_size, 1, feat) -> (batch_size, feat)로 squeeze하여 반환
+            sampled_tensors.append(self.tensors[name][indexes].squeeze(1))
+            
+        return sampled_tensors
 
 
-class HighLevelHindsightReplayBuffer(EpisodeWiseReplayBuffer):
-    def __init__(self, capacity, tr_namedtuple, modified_ep_num=3, seed=0):
-        EpisodeWiseReplayBuffer.__init__(self, capacity, tr_namedtuple, seed)
-        self.modified_ep_num = modified_ep_num
 
-    def modify_experiences(self):
-        if len(self.episodes) == 0:
-            return
-        for _ in range(len(self.episodes)):
-            ep = self.episodes[_]
-            # if any option has been achieved
-            # the whole trajectory before that option is done
-            # could have been rewarded if the achieved goal was the desired goal
-            count = 0
-            for ind in range(len(ep)):
-                if not (1 - ep[ind].option_done):
-                    continue
-                else:
-                    if ep[ind].reward == 0.0:
-                        continue
-                    else:
-                        modified_ep = []
-                        for tr in range(ind+1):
-                            s = ep[tr].state
-                            dg = ep[ind].achieved_goal
-                            o = ep[tr].option
-                            ns = ep[tr].next_state
-                            op_d = ep[tr].option_done
-                            ag = ep[tr].achieved_goal
-                            ts = ep[tr].timesteps
-                            r = ep[tr].reward
-                            d = ep[tr].done
-                            if tr == ind:
-                                modified_ep.append(self.Transition(s, dg, o, ns, ag, op_d, ts, 0.0, d))
-                            else:
-                                modified_ep.append(self.Transition(s, dg, o, ns, ag, op_d, ts, r, d))
-                        self.episodes.append(dcp(modified_ep))
-                        count += 1
-                        if count >= self.modified_ep_num:
-                            break
+
+class HighLevelHindSightReplayBuffer(Memory):
+
+    def __init__(
+        self,
+        memory_size: int,
+        device: Optional[Union[str, torch.device]] = None,
+        export: bool = False,
+        export_format: str = "pt",
+        export_directory: str = "",
+        k_num: int = 4,
+        strategy: str = "future"
+    ) -> None:
+        super().__init__(memory_size=memory_size, 
+                         num_envs=1, 
+                         device=device, 
+                         export=export, 
+                         export_format=export_format, 
+                         export_directory=export_directory)
+
+        self.k = k_num
+        self.strategy = strategy
+    
+    def add_samples(self, **tensors):
+        # 현재 배치 크기 확인
+        batch_size = next(iter(tensors.values())).shape[0]
+        
+        # 남은 공간 계산
+        space_left = self.memory_size - self.memory_index
+        
+        # 한 번에 추가할 수 있는 양과, 순환하여 추가할 양으로 나눔
+        fit_size = min(batch_size, space_left)
+        overflow_size = batch_size - fit_size
+
+        # ======= 버퍼에 데이터 복사 ========
+        for name, tensor in tensors.items():
+            if name in self.tensors:
+                # 버퍼의 남은 공간에 데이터 채우기
+                #    (batch_size, feat) -> (batch_size, 1, feat)로 unsqueeze하여 저장
+                self.tensors[name][self.memory_index : self.memory_index + fit_size] = tensor[:fit_size].unsqueeze(1)
+
+                # 버퍼 용량을 넘는 데이터는 처음부터 덮어쓰기 (Queue형 버퍼)
+                if overflow_size > 0:
+                    self.tensors[name][0:overflow_size] = tensor[fit_size:].unsqueeze(1)
+        
+        # 포인터 업데이트
+        self.memory_index = (self.memory_index + batch_size) % self.memory_size
+        if not self.filled and (self.memory_index + batch_size >= self.memory_size):
+            self.filled = True
+    
+    def sample(self, batch_size: int, names: list[str]) -> tuple[list[torch.Tensor], torch.Tensor]:
+        """
+        버퍼에서 무작위로 transition 배치를 샘플링
+        
+        :param batch_size: 샘플링할 배치의 크기
+        :param names: 샘플링할 텐서의 이름 리스트
+        :return: 텐서 리스트와 샘플링된 인덱스
+        """
+        # 샘플링 가능한 최대 인덱스
+        max_index = self.memory_size if self.filled else self.memory_index
+        if max_index == 0:
+            return [torch.empty(0) for _ in names], torch.empty(0)
+            
+        # batch_size 만큼의 랜덤 인덱스 생성
+        indexes = torch.randint(0, max_index, (batch_size,), device=self.device)
+        
+        # 해당 인덱스의 데이터를 가져와서 리스트에 담음
+        sampled_tensors = []
+        for name in names:
+            # (batch_size, 1, feat) -> (batch_size, feat)로 squeeze하여 반환
+            sampled_tensors.append(self.tensors[name][indexes].squeeze(1))
+            
+        return sampled_tensors
+

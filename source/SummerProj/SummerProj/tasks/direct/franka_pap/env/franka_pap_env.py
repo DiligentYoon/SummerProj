@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
+import gymnasium as gym
 import numpy as np
 import torch
 import isaaclab.sim as sim_utils
@@ -87,6 +88,39 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self.scene.rigid_objects["object"] = self._object
         super()._setup_scene()
 
+    
+    def _configure_gym_env_spaces(self):
+        self.single_action_space =  gym.spaces.Dict({
+            "high_level": gym.spaces.Discrete(self.cfg.high_level_action_dim),
+    
+            "low_level": gym.spaces.Dict({
+                "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
+                "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
+            })
+        })
+
+        self.single_observation_space = gym.spaces.Dict({
+            "high_level": gym.spaces.Dict({
+                "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+                "desired_goal": gym.spaces.MultiBinary(self.cfg.high_level_goal_dim)
+            }),
+
+            "low_level": gym.spaces.Dict({
+                "policy": gym.spaces.Dict({
+                    "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+                    "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
+                }),
+                "critic": gym.spaces.Dict({
+                    "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+                    "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,)),
+                    "taken_action": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
+                })
+            }),
+        })
+
+        self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
+        self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
+        
 
 
     # ================= IK + Controller Gain =================

@@ -17,7 +17,10 @@ from skrl.utils.runner.torch import Runner
 from skrl.models.torch import Model
 from skrl.agents.torch import Agent
 
+from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.replay_buffer import LowLevelHindSightReplayBuffer
+from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.replay_buffer import HighLevelHindSightReplayBuffer
 from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.diol_agent import DIOLAgent
+from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.low_agent import DDPGAgent
 from source.SummerProj.SummerProj.tasks.direct.franka_pap.trainers.trainer import HRLTrainer
 
 
@@ -34,18 +37,20 @@ class AISLDIOLRunner(Runner):
         # desired_goal : high-level goal
         # High-Level Policy : \pi_{g}^H (a^H | s, g^H)
         # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
-        single_high_level_observation_space = gym.spaces.Dict({
-            "observation": env._unwrapped.single_observation_space["policy"]["observation"],
-            "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
-        })
-        single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
-        high_level_observation_space = gym.vector.utils.batch_space(single_high_level_observation_space, self._env.num_envs)
-        high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
+        # single_high_level_observation_space = gym.spaces.Dict({
+        #     "observation": env._unwrapped.single_observation_space["policy"]["observation"],
+        #     "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
+        # })
+        # single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
+        # high_level_observation_space = gym.vector.utils.batch_space(single_high_level_observation_space, self._env.num_envs)
+        # high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
 
 
         # Low-Level 정책(DDPG)을 위한 공간은 환경에서 이미 정의 : 값만 가져오기
-        low_level_observation_space = env._unwrapped.observation_space
-        low_level_action_space = env._unwrapped.action_space
+        high_level_observation_space = env._unwrapped.observation_space["high_level"]
+        high_level_action_space = env._unwrapped.action_space["high_level"]
+        low_level_observation_space = env._unwrapped.observation_space["low_level"]
+        low_level_action_space = env._unwrapped.action_space["low_level"]
 
 
         # ==== 모델을 저장할 Dictionary 초기화 ====
@@ -85,8 +90,8 @@ class AISLDIOLRunner(Runner):
             # Hydra를 사용하여 커스텀 모델 인스턴스화
             if "_target_" in model_config:
                 if role == "policy":
-                    model_config["observation_space"] = low_level_observation_space[role]
-                    model_config["action_space"] = low_level_action_space[role]
+                    model_config["observation_space"] = low_level_observation_space["policy"]
+                    model_config["action_space"] = low_level_action_space["policy"]
                 else:
                     model_config["observation_space"] = low_level_observation_space["critic"]
                     model_config["action_space"] = low_level_action_space["critic"]
@@ -114,6 +119,11 @@ class AISLDIOLRunner(Runner):
         agent_cfg = copy.deepcopy(cfg.get("agent", {}))
         agent_cfg.update(self._process_cfg(agent_cfg))
         memory_cfg = copy.deepcopy(cfg.get("memory", {}))
+
+        high_level_observation_space = env._unwrapped.observation_space["high_level"]
+        high_level_action_space = env._unwrapped.action_space["high_level"]
+        low_level_observation_space = env._unwrapped.observation_space["low_level"]
+        low_level_action_space = env._unwrapped.action_space["low_level"]
         
         # --- High-Level 에이전트 (DIOLAgent) 생성 ---
         print("[AISLRunner] Instantiating high-level agent (DIOLAgent)...")
@@ -121,29 +131,22 @@ class AISLDIOLRunner(Runner):
         memory_cfg_high = memory_cfg.get("high_level", {})
         models_high = models.get("high_level", {})
 
-        if agent_cfg_high and memory_cfg_high and models_high:
-            # DIOLAgent를 위한 공간 정보 정의
-            observation_space_high = models_high["q_network"].observation_space
-            action_space_high = models_high["q_network"].action_space
-            # action_space_high = gym.spaces.Discrete(cfg["trainer"]["high_level_goal_dim"])
-            
+        if agent_cfg_high and models_high:
             # 고수준 메모리(리플레이 버퍼) 생성
-            memory_class = self._component(memory_cfg_high.get("class", "RandomMemory"))
-            memory_high = memory_class(memory_size=memory_cfg_high.get("memory_size"), 
-                                       num_envs=env.num_envs, 
-                                       device=env.device)
+            memory_high = HighLevelHindSightReplayBuffer(memory_size=memory_cfg_high.get("memory_size"),  
+                                                         device=env.device)
             
             # Preprocessor 설정
             if agent_cfg_high.get("state_preprocessor_kwargs") is None:
                 agent_cfg_high["state_preprocessor_kwargs"] = {}
             agent_cfg_high["state_preprocessor_kwargs"].update(
-            {"size": observation_space_high, "device": env.device})
+            {"size": high_level_observation_space, "device": env.device})
 
             # 커스텀 DIOLAgent 클래스 인스턴스화
             self.high_level_agent = DIOLAgent(models=models_high,
                                               memory=memory_high,
-                                              observation_space=observation_space_high,
-                                              action_space=action_space_high,
+                                              observation_space=high_level_observation_space,
+                                              action_space=high_level_action_space,
                                               device=env.device,
                                               cfg=agent_cfg_high)
             print("  - Instantiated high-level agent: DIOLAgent")
@@ -159,35 +162,31 @@ class AISLDIOLRunner(Runner):
         models_low = models.get("low_level", {})
 
         if agent_cfg_low and memory_cfg_low and models_low:
-            # 저수준 DDPG 에이전트는 skrl의 표준 클래스를 사용
-            agent_class = self._component(agent_cfg_low.get("class"))
-            
             # 저수준 메모리(리플레이 버퍼) 생성
-            memory_class = self._component(memory_cfg_low.get("class", "RandomMemory"))
-            memory_low = memory_class(memory_size=memory_cfg_low.get("memory_size"),
-                                      num_envs=env.num_envs,
-                                      device=env.device)
+            memory_low = LowLevelHindSightReplayBuffer(memory_size=memory_cfg_low.get("memory_size"),
+                                                       device=env.device)
             
             # preprocessor 설정
             if agent_cfg_low.get("state_preprocessor_kwargs") is None:
                 agent_cfg_low["state_preprocessor_kwargs"] = {}
-            if agent_cfg_low.get("value_preprocessor_kwargs") is None:
-                agent_cfg_low["value_preprocessor_kwargs"] = {}
-
 
             agent_cfg_low["state_preprocessor_kwargs"].update(
-                {"size": env._unwrapped.observation_space, "device": env.device})
-            agent_cfg_low["value_preprocessor_kwargs"].update(
-                {"size": 1, "device": env.device}
+                {"policy": {
+                    "size": low_level_observation_space["policy"], "device": env.device
+                    },
+                 "critic": {
+                    "size": low_level_observation_space["critic"], "device": env.device
+                    }
+                }
             )
 
             # skrl의 DDPG 에이전트 인스턴스화
-            self.low_level_agent = agent_class(models=models_low,
-                                                memory=memory_low,
-                                                observation_space=env._unwrapped.observation_space,
-                                                action_space=env._unwrapped.action_space,
-                                                device=env.device,
-                                                cfg=agent_cfg_low)
+            self.low_level_agent = DDPGAgent(models=models_low,
+                                             memory=memory_low,
+                                             observation_space=low_level_observation_space,
+                                             action_space=low_level_action_space,
+                                             device=env.device,
+                                             cfg=agent_cfg_low)
             
             print("  - Instantiated low-level agent: DDPG")
         

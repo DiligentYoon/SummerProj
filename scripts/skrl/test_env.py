@@ -49,7 +49,7 @@ agent_cfg_entry_point = "skrl_cfg_entry_point" if algorithm in ["ppo"] else f"sk
 @hydra_task_config(args_cli.task, agent_cfg_entry_point)
 def main(env_cfg: dict, agent_cfg: dict):
     """
-    Runner와 그 내부 컴포넌트들의 생성 및 초기 상태를 확인합니다.
+        Runner와 그 내부 컴포넌트들의 생성 및 초기 상태를 확인합니다.
     """
     # 환경 설정 오버라이드
     env_cfg.scene.num_envs = args_cli.num_envs
@@ -59,7 +59,7 @@ def main(env_cfg: dict, agent_cfg: dict):
     env = gym.make(args_cli.task, cfg=env_cfg)
     env = SkrlVecEnvWrapper(env)
 
-    # --- [핵심] AISLDIOLRunner 인스턴스화 테스트 ---
+    # ---  AISLDIOLRunner 인스턴스 ---
     # __init__, _generate_models, _generate_agent, _generate_trainer가 모두 호출됩니다.
     print("\n[DEBUG] Instantiating AISLDIOLRunner...")
     runner = AISLDIOLRunner(env, agent_cfg)

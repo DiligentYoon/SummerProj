@@ -24,3 +24,4 @@ class FrankaPapAction(IntEnum):
     RELEASE_OBJECT = 6     # 7. Open the gripper
     RETREAT_FROM_GOAL = 7  # 8. Move the TCP up to a safe retreat position
 
+    

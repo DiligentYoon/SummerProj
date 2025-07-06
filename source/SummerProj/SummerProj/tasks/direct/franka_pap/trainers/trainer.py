@@ -11,6 +11,8 @@ from skrl.envs.wrappers.torch import Wrapper
 from skrl.trainers.torch import Trainer
 from isaaclab.utils.math import quat_error_magnitude
 
+from ..agents.replay_buffer import EpisodeWiseReplayBuffer
+
 HRL_TRAINER_DEFAULT_CONFIG = {
     "timesteps": 100000,          # 총 학습 타임스텝
     "headless": False,            # 렌더링 없는 헤드리스 모드 사용 여부
@@ -78,6 +80,7 @@ class HRLTrainer(Trainer):
         self.h_actions = torch.zeros((self.env.num_envs, 1), device=self.env.device)
 
         # HER을 구현하기 위한 에피소드 버퍼
+        high_level_obs_space = self.high_level_agent.observation_space
         low_level_obs_space = self.low_level_agent.observation_space
         low_level_action_space = self.low_level_agent.action_space
         self.max_episode_buffer_length = env._unwrapped.max_episode_length
@@ -89,20 +92,44 @@ class HRLTrainer(Trainer):
                                              device=self.env.device, dtype=torch.float32)
             next_states_buffer[key] = torch.zeros((self.max_episode_buffer_length, self.env.num_envs, space.shape[-1]),
                                                   device=self.env.device, dtype=torch.float32)
-
-        self.episode_buffer = {
-            "states": {"policy": states_buffer},
-            "actions": torch.zeros((self.max_episode_buffer_length, self.env.num_envs, low_level_action_space.shape[0]), device=self.env.device),
-            "rewards": torch.zeros((self.max_episode_buffer_length, self.env.num_envs, 1), device=self.env.device),
-            "next_states": {"policy": next_states_buffer},
-            "terminated": torch.zeros((self.max_episode_buffer_length, self.env.num_envs, 1), dtype=torch.bool, device=self.env.device),
-            "truncated": torch.zeros((self.max_episode_buffer_length, self.env.num_envs, 1), dtype=torch.bool, device=self.env.device),
-        }
-        self.episode_step_ptr = torch.zeros(self.env.num_envs, dtype=torch.long, device=self.env.device)
-
         
+        self.episode_buffer = EpisodeWiseReplayBuffer(self.max_episode_buffer_length, self.env.num_envs, self.env.device)
+        self.episode_buffer.create_tensor("states", size=low_level_obs_space["policy"]["observation"].shape[-1],
+                                          dtype=torch.float32, keep_dimensions=True)
+        self.episode_buffer.create_tensor("sub_goal", size=self.env._unwrapped.cfg.low_level_goal_dim,
+                                          dtype=torch.float32, keep_dimensions=True)
+        self.episode_buffer.create_tensor("final_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,
+                                          dtype=torch.float32, keep_dimensions=True)
+        self.episode_buffer.create_tensor("action", size=low_level_action_space.shape[0],
+                                          dtype=torch.float32, keep_dimensions=True)
+        self.episode_buffer.create_tensor("reward", size=1,
+                                          dtype=torch.float32, keep_dimensions=True)
+        self.episode_buffer.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim,
+                                          dtype=torch.float32, keep_dimensions=True)
+        self.episode_buffer.create_tensor("next_states", size=low_level_obs_space["policy"]["observation"].shape[-1],
+                                          dtype=torch.float32, keep_dimensions=True)
+        self.episode_buffer.create_tensor("terminated", size=1,
+                                          dtype=torch.bool, keep_dimensions=True)
+        self.episode_buffer.create_tensor("truncated", size=1,
+                                          dtype=torch.bool, keep_dimensions=True)
+
+        # 에이전트 초기화 & 리플레이 버퍼에 HRL 전용 Term 추가
         self.high_level_agent.init(trainer_cfg = self.cfg)
         self.low_level_agent.init(trainer_cfg = self.cfg)
+
+        self.high_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,
+                                                   dtype=torch.float32, keep_dimensions=True)
+        self.high_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,
+                                                   dtype=torch.float32, keep_dimensions=True)
+        self.low_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.low_level_goal_dim,
+                                                   dtype=torch.float32, keep_dimensions=True)
+        self.low_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim,
+                                                   dtype=torch.float32, keep_dimensions=True)
+        
+        for k_high, k_low in zip(self.high_level_agent.memory.tensors.keys(), self.low_level_agent.memory.tensors.keys()):
+            self.high_level_agent._tensors_name.append(k_high)
+            self.low_level_agent._tensors.name.append(k_low)
+        
         print("[HRLTrainer] Initialize agents...")
     
 
@@ -168,6 +195,7 @@ class HRLTrainer(Trainer):
                                           next_obs_dict, 
                                           terminated, 
                                           truncated)
+            
             self._record_high_level_transition(obs, 
                                                high_level_action, 
                                                info.get("high_level_reward"), 
@@ -348,20 +376,13 @@ class HRLTrainer(Trainer):
             한 타임스텝의 저수준 경험을 에피소드 임시 버퍼에 저장.
             HER을 적용하기 전에 한 에피소드의 모든 데이터를 수집하는 역할.
         """
-        step_idx = self.episode_step_ptr[0]
-
-        self.episode_buffer["states"]["policy"]["observation"][step_idx] = obs["policy"]["observation"]
-        self.episode_buffer["states"]["policy"]["achieved_goal"][step_idx] = obs["policy"]["achieved_goal"]
-        self.episode_buffer["states"]["policy"]["desired_goal"][step_idx] = obs["policy"]["desired_goal"]
-        self.episode_buffer["actions"][step_idx] = action
-        self.episode_buffer["rewards"][step_idx] = reward.unsqueeze(-1)
-        self.episode_buffer["next_states"]["policy"]["observation"][step_idx] = next_obs["policy"]["observation"]
-        self.episode_buffer["next_states"]["policy"]["achieved_goal"][step_idx] = next_obs["policy"]["achieved_goal"]
-        self.episode_buffer["next_states"]["policy"]["desired_goal"][step_idx] = next_obs["policy"]["desired_goal"]
-        self.episode_buffer["terminated"][step_idx] = terminated
-        self.episode_buffer["truncated"][step_idx] = truncated
-
-        self.episode_step_ptr += 1
+        self.episode_buffer.add_samples(states=obs["policy"]["observation"],
+                                        sub_goal=obs["policy"]["sub_goal"],
+                                        action=action,
+                                        reward=reward,
+                                        next_states=next_obs["policy"]["observation"],
+                                        terminated=terminated,
+                                        truncated=truncated)
 
     
     def _apply_her_and_record_transition(self, env_ids: torch.Tensor) -> None:

@@ -2,6 +2,7 @@ from typing import Any, Mapping, Optional, Tuple, Union
 
 import copy
 import gymnasium
+import numpy as np
 from packaging import version
 
 import torch
@@ -9,10 +10,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from skrl import config, logger
-from skrl.agents.torch.ddpg import DDPG
-from skrl.memories.torch import Memory
-from .replay_buffer import LowLevelHindsightReplayBuffer
+from skrl.agents.torch import Agent
 from skrl.models.torch import Model
+
+from .replay_buffer import LowLevelHindSightReplayBuffer
 
 # fmt: off
 # [start-config-dict-torch]
@@ -63,16 +64,15 @@ DDPG_DEFAULT_CONFIG = {
 # fmt: on
 
 
-class DDPGAgent(DDPG):
+class DDPGAgent(Agent):
     def __init__(self,
                  models: Mapping[str, Model],
-                 memory: Optional[Union[LowLevelHindsightReplayBuffer, Tuple[LowLevelHindsightReplayBuffer]]] = None,
+                 memory: Optional[Union[LowLevelHindSightReplayBuffer, Tuple[LowLevelHindSightReplayBuffer]]] = None,
                  observation_space: Optional[Union[int, Tuple[int], gymnasium.Space]] = None,
                  action_space: Optional[Union[int, Tuple[int], gymnasium.Space]] = None,
                  device: Optional[Union[str, torch.device]] = None,
                  cfg: Optional[dict] = None) -> None:
-        
-        # DDPG의 __init__ 내용을 거의 그대로 가져옵니다.
+
         _cfg = copy.deepcopy(DDPG_DEFAULT_CONFIG)
         _cfg.update(cfg if cfg is not None else {})
 
@@ -85,13 +85,151 @@ class DDPGAgent(DDPG):
             cfg=_cfg,
         )
 
+        # models
+        self.policy = self.models.get("policy", None)
+        self.critic = {
+            "critic_1": self.models.get("critic_1"),
+            "critic_2": self.models.get("critic_2")
+        }
+        self.target_critic = {
+            "target_critic_1": self.models.get("target_critic_1"),
+            "target_critic_2": self.models.get("target_critic_2")
+        }
+
+        # checkpoint models
+        self.checkpoint_modules["policy"] = self.policy
+        self.checkpoint_modules["critic"] = self.critic
+        self.checkpoint_modules["target_critic"] = self.target_critic
+
+        # freeze target networks with respect to optimizers (update via .update_parameters())
+        for critic_model, target_critic_model in zip(self.critic.values(), self.target_critic.values()):
+            if target_critic_model is not None:
+                target_critic_model.freeze_parameters(True)
+                target_critic_model.update_parameters(critic_model)
+        
+        # configuration
+        self._gradient_steps = self.cfg["gradient_steps"]
+        self._batch_size = self.cfg["batch_size"]
+
+        self._discount_factor = self.cfg["discount_factor"]
+        self._polyak = self.cfg["polyak"]
+
+        self._actor_learning_rate = self.cfg["actor_learning_rate"]
+        self._critic_learning_rate = self.cfg["critic_learning_rate"]
+        self._learning_rate_scheduler = self.cfg["learning_rate_scheduler"]
+
+        self._state_preprocessor = self.cfg["state_preprocessor"]
+
+        self._random_timesteps = self.cfg["random_timesteps"]
+        self._learning_starts = self.cfg["learning_starts"]
+
+        self._grad_norm_clip = self.cfg["grad_norm_clip"]
+
+        self._exploration_noise = self.cfg["exploration"]["noise"]
+        self._exploration_initial_scale = self.cfg["exploration"]["initial_scale"]
+        self._exploration_final_scale = self.cfg["exploration"]["final_scale"]
+        self._exploration_timesteps = self.cfg["exploration"]["timesteps"]
+
+        self._rewards_shaper = self.cfg["rewards_shaper"]
+
+        self._mixed_precision = self.cfg["mixed_precision"]
+
+        if config.torch.is_distributed:
+            logger.info(f"Broadcasting models' parameters")
+            if self.policy is not None:
+                self.policy.broadcast_parameters()
+            for k, v in self.critic.items():
+                if v is not None:
+                    v.broadcast_parameters()
+
+        # set up automatic mixed precision
+        self._device_type = torch.device(device).type
+        if version.parse(torch.__version__) >= version.parse("2.4"):
+            self.scaler = torch.amp.GradScaler(device=self._device_type, enabled=self._mixed_precision)
+        else:
+            self.scaler = torch.cuda.amp.GradScaler(enabled=self._mixed_precision)
+
+        # set up optimizers and learning rate schedulers
+        if self.policy is not None and self.critic is not None:
+            self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=self._actor_learning_rate)
+            if self._learning_rate_scheduler is not None:
+                self.policy_scheduler = self._learning_rate_scheduler(
+                    self.policy_optimizer, **self.cfg["learning_rate_scheduler_kwargs"]
+                )
+        
+        self.critic_optimizer = {}
+        self.critic_scheduler = {}
+        for k, v in self.critic.items():
+            if v is not None:
+                self.critic_optimizer[k] = torch.optim.Adam(v.parameters(), lr=self._critic_learning_rate)
+                if self._learning_rate_scheduler is not None:
+                    self.critic_scheduler[k] = self._learning_rate_scheduler(
+                        self.critic_optimizer[k], **self.cfg["learning_rate_scheduler_kwargs"]
+                    )
+
+        self.checkpoint_modules["policy_optimizer"] = self.policy_optimizer
+        self.checkpoint_modules["critic_optimizer"] = self.critic_optimizer
+
+        # set up preprocessors
+        if self._state_preprocessor:
+            _policy_state_preprocessor = self._state_preprocessor(**self.cfg["state_preprocessor_kwargs"]["policy"])
+            self.checkpoint_modules["policy_state_preprocessor"] = _policy_state_preprocessor
+
+            _critic_state_preprocessor = self._state_preprocessor(**self.cfg["state_preprocessor_kwargs"]["critic"])
+            self.checkpoint_modules["critic_state_preprocessor"] = _critic_state_preprocessor
+        else:
+            _policy_state_preprocessor = self._empty_preprocessor
+            _critic_state_preprocessor = self._empty_preprocessor
+        
+        self._state_preprocessor = {
+            "policy": _policy_state_preprocessor,
+            "critic": _critic_state_preprocessor}
+    
+        self._tensors_names = []
+
+
+
     def init(self, trainer_cfg: Optional[Mapping[str, Any]] = None) -> None:
-        super().__init__(trainer_cfg=trainer_cfg)
+        """Initialize the agent"""
+        super().init(trainer_cfg=trainer_cfg)
+        self.set_mode("eval")
+
+        # create tensors in memory
+        if self.memory is not None:
+            self.memory.create_tensor(name="states", size=self.observation_space["policy"], dtype=torch.float32)
+            self.memory.create_tensor(name="next_states", size=self.observation_space["policy"], dtype=torch.float32)
+            self.memory.create_tensor(name="actions", size=self.action_space["policy"], dtype=torch.float32)
+            self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32)
+            self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool)
+            self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool)
+
+        # clip noise bounds
+        if self.action_space is not None:
+            self.clip_actions_min = torch.tensor(self.action_space.low, device=self.device)
+            self.clip_actions_max = torch.tensor(self.action_space.high, device=self.device)
+    
 
     def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> torch.Tensor:
-        # states는 반드시 train 코드쪽에서 Dict -> Tensor 타입으로 변환해서 줘야 한다.
-        return super().act(states, timestep, timesteps)
-    
+        """Process the environment's states to make a decision (actions) using the main policy
+
+        :param states: Environment's states
+        :type states: torch.Tensor
+        :param timestep: Current timestep
+        :type timestep: int
+        :param timesteps: Number of timesteps
+        :type timesteps: int
+
+        :return: Actions
+        :rtype: torch.Tensor
+        """
+
+        # sample deterministic actions
+        with torch.autocast(device_type=self._device_type, enabled=self._mixed_precision):
+            actions, _, = self.policy.compute({"states": self._state_preprocessor(states)}, role="policy")
+        
+        return actions, None, {}
+
+
     def record_transition(
         self,
         states: torch.Tensor,
@@ -105,7 +243,49 @@ class DDPGAgent(DDPG):
         timesteps: int,
     ) -> None:
         
-        super().record_transition(states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps)
+        super().record_transition(
+            states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps
+        )
+
+        if self.memory is not None:
+            # storage transition in memory
+            self.memory.add_samples(
+                states=states,
+                actions=actions,
+                rewards=rewards,
+                next_states=next_states,
+                terminated=terminated,
+                truncated=truncated,
+            )
+    
+    def post_interaction(self, timestep: int, timesteps: int) -> None:
+        """Callback called after the interaction with the environment
+
+        :param timestep: Current timestep
+        :type timestep: int
+        :param timesteps: Number of timesteps
+        :type timesteps: int
+        """
+        timestep += 1
+
+        # update best models and write checkpoints
+        if timestep > 1 and self.checkpoint_interval > 0 and not timestep % self.checkpoint_interval:
+            # update best models
+            reward = np.mean(self.tracking_data.get("Reward / Total reward (mean)", -(2**31)))
+            if reward > self.checkpoint_best_modules["reward"]:
+                self.checkpoint_best_modules["timestep"] = timestep
+                self.checkpoint_best_modules["reward"] = reward
+                self.checkpoint_best_modules["saved"] = False
+                self.checkpoint_best_modules["modules"] = {
+                    k: copy.deepcopy(self._get_internal_value(v)) for k, v in self.checkpoint_modules.items()
+                }
+            # write checkpoints
+            self.write_checkpoint(timestep, timesteps)
+
+        # write to tensorboard
+        if timestep > 1 and self.write_interval > 0 and not timestep % self.write_interval:
+            self.write_tracking_data(timestep, timesteps)
+
 
     
     def _update(self, timestep, timesteps):
@@ -125,3 +305,4 @@ class DDPGAgent(DDPG):
 
             with torch.autocast(device_type=self._device_type, enabled=self._mixed_precision):
                 pass
+
