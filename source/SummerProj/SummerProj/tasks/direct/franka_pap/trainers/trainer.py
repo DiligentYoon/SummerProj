@@ -94,41 +94,28 @@ class HRLTrainer(Trainer):
                                                   device=self.env.device, dtype=torch.float32)
         
         self.episode_buffer = EpisodeWiseReplayBuffer(self.max_episode_buffer_length, self.env.num_envs, self.env.device)
-        self.episode_buffer.create_tensor("states", size=low_level_obs_space["policy"]["observation"].shape[-1],
-                                          dtype=torch.float32, keep_dimensions=True)
-        self.episode_buffer.create_tensor("sub_goal", size=self.env._unwrapped.cfg.low_level_goal_dim,
-                                          dtype=torch.float32, keep_dimensions=True)
-        self.episode_buffer.create_tensor("final_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,
-                                          dtype=torch.float32, keep_dimensions=True)
-        self.episode_buffer.create_tensor("action", size=low_level_action_space.shape[0],
-                                          dtype=torch.float32, keep_dimensions=True)
-        self.episode_buffer.create_tensor("reward", size=1,
-                                          dtype=torch.float32, keep_dimensions=True)
-        self.episode_buffer.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim,
-                                          dtype=torch.float32, keep_dimensions=True)
-        self.episode_buffer.create_tensor("next_states", size=low_level_obs_space["policy"]["observation"].shape[-1],
-                                          dtype=torch.float32, keep_dimensions=True)
-        self.episode_buffer.create_tensor("terminated", size=1,
-                                          dtype=torch.bool, keep_dimensions=True)
-        self.episode_buffer.create_tensor("truncated", size=1,
-                                          dtype=torch.bool, keep_dimensions=True)
+        self.episode_buffer.create_tensor("states", size=low_level_obs_space["policy"]["observation"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("sub_goal", size=self.env._unwrapped.cfg.low_level_goal_dim, dtype=torch.float32)
+        self.episode_buffer.create_tensor("final_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,dtype=torch.float32)
+        self.episode_buffer.create_tensor("action", size=low_level_action_space["policy"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("reward", size=1, dtype=torch.float32)
+        self.episode_buffer.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim, dtype=torch.float32)
+        self.episode_buffer.create_tensor("next_states", size=low_level_obs_space["policy"]["observation"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("terminated", size=1, dtype=torch.bool)
+        self.episode_buffer.create_tensor("truncated", size=1, dtype=torch.bool)
 
         # 에이전트 초기화 & 리플레이 버퍼에 HRL 전용 Term 추가
         self.high_level_agent.init(trainer_cfg = self.cfg)
         self.low_level_agent.init(trainer_cfg = self.cfg)
 
-        self.high_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,
-                                                   dtype=torch.float32, keep_dimensions=True)
-        self.high_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,
-                                                   dtype=torch.float32, keep_dimensions=True)
-        self.low_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.low_level_goal_dim,
-                                                   dtype=torch.float32, keep_dimensions=True)
-        self.low_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim,
-                                                   dtype=torch.float32, keep_dimensions=True)
+        self.high_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.high_level_goal_dim, dtype=torch.float32)
+        self.high_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.high_level_goal_dim, dtype=torch.float32)
+        self.low_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.low_level_goal_dim, dtype=torch.float32)
+        self.low_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim, dtype=torch.float32)
         
         for k_high, k_low in zip(self.high_level_agent.memory.tensors.keys(), self.low_level_agent.memory.tensors.keys()):
-            self.high_level_agent._tensors_name.append(k_high)
-            self.low_level_agent._tensors.name.append(k_low)
+            self.high_level_agent._tensors_names.append(k_high)
+            self.low_level_agent._tensors_names.append(k_low)
         
         print("[HRLTrainer] Initialize agents...")
     

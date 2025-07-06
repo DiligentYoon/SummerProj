@@ -13,6 +13,7 @@ from isaaclab.markers import VisualizationMarkers
 from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms, \
                                 combine_frame_transforms, quat_from_angle_axis, quat_mul, quat_inv, sample_uniform, saturate, \
                                 matrix_from_quat, quat_apply
+from isaaclab.envs.utils.spaces import sample_space
 
 from .franka_pap_env_cfg import FrankaPapEnvCfg
 from ..base.franka_base_env_diol import FrankaBaseDIOLEnv
@@ -28,13 +29,14 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self.obs_buf = {
             "policy": {
                 "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
-                "achieved_goal": torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device),
-                "final_goal": torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), device=self.device),
-                "sub_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
+                "desired_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
+                # "achieved_goal": torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device),
+                # "final_goal": torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), device=self.device),
+                # "sub_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
             },
             "critic":{
                 "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
-                "sub_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device),
+                "desired_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device),
                 "taken_action": torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
             }
         }
@@ -89,37 +91,39 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         super()._setup_scene()
 
     
-    def _configure_gym_env_spaces(self):
-        self.single_action_space =  gym.spaces.Dict({
-            "high_level": gym.spaces.Discrete(self.cfg.high_level_action_dim),
+    # def _configure_gym_env_spaces(self):
+    #     self.single_action_space =  gym.spaces.Dict({
+    #         "high_level": gym.spaces.Discrete(self.cfg.high_level_action_dim),
     
-            "low_level": gym.spaces.Dict({
-                "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
-                "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
-            })
-        })
+    #         "low_level": gym.spaces.Dict({
+    #             "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
+    #             "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
+    #         })
+    #     })
 
-        self.single_observation_space = gym.spaces.Dict({
-            "high_level": gym.spaces.Dict({
-                "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-                "desired_goal": gym.spaces.MultiBinary(self.cfg.high_level_goal_dim)
-            }),
+    #     self.single_observation_space = gym.spaces.Dict({
+    #         "high_level": gym.spaces.Dict({
+    #             "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+    #             "desired_goal": gym.spaces.MultiBinary(self.cfg.high_level_goal_dim)
+    #         }),
 
-            "low_level": gym.spaces.Dict({
-                "policy": gym.spaces.Dict({
-                    "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-                    "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
-                }),
-                "critic": gym.spaces.Dict({
-                    "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-                    "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,)),
-                    "taken_action": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
-                })
-            }),
-        })
+    #         "low_level": gym.spaces.Dict({
+    #             "policy": gym.spaces.Dict({
+    #                 "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+    #                 "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
+    #             }),
+    #             "critic": gym.spaces.Dict({
+    #                 "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+    #                 "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,)),
+    #                 "taken_action": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
+    #             })
+    #         }),
+    #     })
 
-        self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
-        self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
+    #     self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
+    #     self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
+
+    #     self.actions = sample_space(self.single_action_space, self.device, batch_size=self.num_envs, fill_value=0)
         
 
 
@@ -224,9 +228,9 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
 
         # === 저 수준 (Low-Level)에 대한 보상 계산 ===
         loc_to_subgoal = torch.norm(self.obs_buf["policy"]["achieved_goal"][:, :3] - \
-                                    self.obs_buf["policy"]["sub_goal"][:, :3], dim=1)
+                                    self.obs_buf["policy"]["desired_goal"][:, :3], dim=1)
         rot_to_subgoal = quat_error_magnitude(self.obs_buf["policy"]["achieved_goal"][:, 3:7], 
-                                              self.obs_buf["policy"]["sub_goal"][:, 3:7])
+                                              self.obs_buf["policy"]["desired_goal"][:, 3:7])
 
         reward_low = torch.where(torch.logical_and(
             loc_to_subgoal < self.cfg.low_level_loc_threshold,
@@ -292,14 +296,14 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         
         obs_buf_1 = {
             "observation": low_level_obs,
-            "achieved_goal": achieved_goal,
-            "final_goal": self.high_level_goals,
-            "sub_goal": self.low_level_goals,
+            "desired_goal": achieved_goal,
+            # "final_goal": self.high_level_goals,
+            # "sub_goal": self.low_level_goals,
         }
 
         obs_buf_2 = {
             "observation": low_level_obs,
-            "sub_goal": self.low_level_goals,
+            "desired_goal": self.low_level_goals,
             "taken_action": self.actions
         }
 
@@ -406,7 +410,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
     def _map_high_level_action_to_low_level_goal(self, high_level_action: torch.Tensor, current_obs: dict) -> torch.Tensor:
         """Mapping a discrete high-level action to a continuous low-level goal state."""
         # Initialize low-level goals with current achieved goals as a baseline
-        low_level_goals = current_obs["policy"]["sub_goal"].clone()
+        low_level_goals = current_obs["policy"]["desired_goal"].clone()
         
         # Get current object and final goal positions from the environment state
         object_pos_w = self._object.data.root_state_w[:, :7]

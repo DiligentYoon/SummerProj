@@ -205,8 +205,8 @@ class DDPGAgent(Agent):
 
         # clip noise bounds
         if self.action_space is not None:
-            self.clip_actions_min = torch.tensor(self.action_space.low, device=self.device)
-            self.clip_actions_max = torch.tensor(self.action_space.high, device=self.device)
+            self.clip_actions_min = torch.tensor(self.action_space["policy"].low, device=self.device)
+            self.clip_actions_max = torch.tensor(self.action_space["policy"].high, device=self.device)
     
 
     def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> torch.Tensor:

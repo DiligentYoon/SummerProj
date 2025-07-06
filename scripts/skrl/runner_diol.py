@@ -37,20 +37,17 @@ class AISLDIOLRunner(Runner):
         # desired_goal : high-level goal
         # High-Level Policy : \pi_{g}^H (a^H | s, g^H)
         # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
-        # single_high_level_observation_space = gym.spaces.Dict({
-        #     "observation": env._unwrapped.single_observation_space["policy"]["observation"],
-        #     "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
-        # })
-        # single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
-        # high_level_observation_space = gym.vector.utils.batch_space(single_high_level_observation_space, self._env.num_envs)
-        # high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
+        single_high_level_observation_space = gym.spaces.Dict({
+            "observation": env._unwrapped.single_observation_space["policy"]["observation"],
+            "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
+        })
+        single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
 
-
-        # Low-Level 정책(DDPG)을 위한 공간은 환경에서 이미 정의 : 값만 가져오기
-        high_level_observation_space = env._unwrapped.observation_space["high_level"]
-        high_level_action_space = env._unwrapped.action_space["high_level"]
-        low_level_observation_space = env._unwrapped.observation_space["low_level"]
-        low_level_action_space = env._unwrapped.action_space["low_level"]
+        # Low-Level 정책(DDPG)을 위한 공간은 환경에서 정의 : 값만 가져오기
+        high_level_observation_space = gym.vector.utils.batch_space(single_high_level_observation_space, self._env.num_envs)
+        high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
+        low_level_observation_space = env._unwrapped.observation_space
+        low_level_action_space = env._unwrapped.action_space
 
 
         # ==== 모델을 저장할 Dictionary 초기화 ====
@@ -119,17 +116,15 @@ class AISLDIOLRunner(Runner):
         agent_cfg = copy.deepcopy(cfg.get("agent", {}))
         agent_cfg.update(self._process_cfg(agent_cfg))
         memory_cfg = copy.deepcopy(cfg.get("memory", {}))
-
-        high_level_observation_space = env._unwrapped.observation_space["high_level"]
-        high_level_action_space = env._unwrapped.action_space["high_level"]
-        low_level_observation_space = env._unwrapped.observation_space["low_level"]
-        low_level_action_space = env._unwrapped.action_space["low_level"]
         
         # --- High-Level 에이전트 (DIOLAgent) 생성 ---
         print("[AISLRunner] Instantiating high-level agent (DIOLAgent)...")
         agent_cfg_high = agent_cfg.get("high_level", {})
         memory_cfg_high = memory_cfg.get("high_level", {})
         models_high = models.get("high_level", {})
+
+        high_level_observation_space = models_high["q_network"].observation_space
+        high_level_action_space = models_high["q_network"].action_space
 
         if agent_cfg_high and models_high:
             # 고수준 메모리(리플레이 버퍼) 생성
@@ -160,6 +155,9 @@ class AISLDIOLRunner(Runner):
         agent_cfg_low = agent_cfg.get("low_level", {})
         memory_cfg_low = memory_cfg.get("low_level", {})
         models_low = models.get("low_level", {})
+
+        low_level_observation_space = env._unwrapped.observation_space
+        low_level_action_space = env._unwrapped.action_space
 
         if agent_cfg_low and memory_cfg_low and models_low:
             # 저수준 메모리(리플레이 버퍼) 생성

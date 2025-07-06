@@ -42,6 +42,10 @@ DIOL_DEFAULT_CONFIG = {
     "state_preprocessor": None,             # state preprocessor class (see skrl.resources.preprocessors)
     "state_preprocessor_kwargs": {},        # state preprocessor's kwargs (e.g. {"size": env.observation_space})
 
+    "rewards_shaper": None,         # rewards shaping function: Callable(reward, timestep, timesteps) -> reward
+
+    "mixed_precision": False,       # enable automatic mixed precision for higher performance
+
     "experiment": {
         "directory": "",            # experiment's parent directory
         "experiment_name": "",      # experiment name
@@ -75,8 +79,6 @@ class DIOLAgent(Agent):
                          action_space=action_space,
                          device=device,
                          cfg=_cfg)
-        
-        self.cfg.update(cfg)
 
         self.q_network = self.models["q_network"]
         self.target_q_network = self.models["target_q_network"]

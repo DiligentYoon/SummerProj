@@ -41,60 +41,31 @@ class DirectDIOL(DirectRLEnv):
 
         print("[INFO] DirectDIOL: Hierarchical RL Environment Manger Initialized.")
 
-    # def _configure_gym_env_spaces(self):
-    #     """Configure the action and observation spaces for the Gym environment."""
-    #     # show deprecation message and overwrite configuration
-    #     if self.cfg.num_actions is not None:
-    #         omni.log.warn("DirectRLEnvCfg.num_actions is deprecated. Use DirectRLEnvCfg.action_space instead.")
-    #         if isinstance(self.cfg.action_space, type(MISSING)):
-    #             self.cfg.action_space = self.cfg.num_actions
-    #     if self.cfg.num_observations is not None:
-    #         omni.log.warn(
-    #             "DirectRLEnvCfg.num_observations is deprecated. Use DirectRLEnvCfg.observation_space instead."
-    #         )
-    #         if isinstance(self.cfg.observation_space, type(MISSING)):
-    #             self.cfg.observation_space = self.cfg.num_observations
-    #     if self.cfg.num_states is not None:
-    #         omni.log.warn("DirectRLEnvCfg.num_states is deprecated. Use DirectRLEnvCfg.state_space instead.")
-    #         if isinstance(self.cfg.state_space, type(MISSING)):
-    #             self.cfg.state_space = self.cfg.num_states
+    def _configure_gym_env_spaces(self):
 
-    #     self.single_action_space = gym.spaces.Dict({
-    #         "high_level": gym.spaces.Dict({
-    #             "policy": gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
-    #         }),
-    #         "low_level": gym.spaces.Dict({
-    #             "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
-    #             "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
-    #         })
-    #     })
+        # ============== Environment Agent (Low-Level) spaces ===============
+        # set up spaces
+        self.single_action_space = gym.spaces.Dict({
+            "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
+            "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
+        })
+        self.single_observation_space = gym.spaces.Dict({
+            "policy": gym.spaces.Dict({
+                "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+                "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
+            }),
+            "critic": gym.spaces.Dict({
+                "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
+                "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,)),
+                "taken_action": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
+            })
+        })
 
+        # set up batched spaces
+        self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
+        self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
 
-    #     # ============== Low-Level spaces ===============
-    #     # set up spaces
-    #     self.single_action_space = gym.spaces.Dict({
-    #         "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
-    #         "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
-    #     })
-    #     self.single_observation_space = gym.spaces.Dict()
-    #     self.single_observation_space["observation"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,))
-    #     # self.single_observation_space["achieved_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.achieved_goal_dim,))
-    #     self.single_observation_space["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
-    #     self.single_observation_space = gym.spaces.Dict({
-    #         "policy": self.single_observation_space
-    #     })
-    #     self.single_observation_space["critic"] = gym.spaces.Dict()
-    #     self.single_observation_space["critic"]["observation"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,))
-    #     self.single_observation_space["critic"]["desired_goal"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
-    #     self.single_observation_space["critic"]["taken_action"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
-
-
-    #     # set up batched spaces
-    #     self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
-    #     self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
-
-    #     # instantiate actions (needed for tasks for which the observations computation is dependent on the actions)
-    #     self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)
+        self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)
 
 
     def _reset_idx(self, env_ids) -> None:
