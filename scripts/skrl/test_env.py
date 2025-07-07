@@ -153,7 +153,7 @@ def main(env_cfg: dict, agent_cfg: dict):
     obs, info = env.reset()
     
     # 임의의 저수준 행동 생성
-    action = torch.from_numpy(env.unwrapped.action_space["policy"].sample())
+    action = torch.from_numpy(env.unwrapped.action_space.sample())
     if action.ndim == 1:
         action = action.unsqueeze(0) # num_envs=1 일 경우를 대비
 

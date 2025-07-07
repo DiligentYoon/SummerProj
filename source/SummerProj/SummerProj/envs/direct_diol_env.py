@@ -34,11 +34,6 @@ class DirectDIOL(DirectRLEnv):
 
         # HRL 관련 버퍼 초기화 (저 수준 목표 및 고 수준 최종 목표)
         self.reward_buf = -1.0 * torch.ones(self.num_envs, dtype=torch.float, device=self.device)
-
-        # extras 딕셔너리에 HRL 관련 키들을 미리 초기화합니다.
-        self.extras["high_level_reward"] = torch.zeros(self.num_envs, device=self.device)
-        self.extras["option_terminated"] = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-
         print("[INFO] DirectDIOL: Hierarchical RL Environment Manger Initialized.")
 
     def _configure_gym_env_spaces(self):
@@ -46,17 +41,9 @@ class DirectDIOL(DirectRLEnv):
         # ============== Environment Agent (Low-Level) spaces ===============
         # set up spaces
         self.single_action_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
-        self.single_observation_space = gym.spaces.Dict({
-            "policy": gym.spaces.Dict({
-                "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-                "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
-            }),
-            "critic": gym.spaces.Dict({
-                "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-                "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,)),
-                "taken_action": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
-            })
-        })
+        self.single_observation_space = gym.spaces.Dict()
+        self.single_observation_space["policy"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space + self.cfg.low_level_goal_dim,))
+        self.single_observation_space["critic"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space + self.cfg.low_level_goal_dim + self.cfg.action_space,))
 
         # set up batched spaces
         self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)

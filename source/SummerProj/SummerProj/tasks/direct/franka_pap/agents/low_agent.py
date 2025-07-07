@@ -198,15 +198,15 @@ class DDPGAgent(Agent):
         if self.memory is not None:
             self.memory.create_tensor(name="states", size=self.observation_space["policy"], dtype=torch.float32)
             self.memory.create_tensor(name="next_states", size=self.observation_space["policy"], dtype=torch.float32)
-            self.memory.create_tensor(name="actions", size=self.action_space["policy"], dtype=torch.float32)
+            self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.float32)
             self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32)
             self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool)
             self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool)
 
         # clip noise bounds
         if self.action_space is not None:
-            self.clip_actions_min = torch.tensor(self.action_space["policy"].low, device=self.device)
-            self.clip_actions_max = torch.tensor(self.action_space["policy"].high, device=self.device)
+            self.clip_actions_min = torch.tensor(self.action_space.low, device=self.device)
+            self.clip_actions_max = torch.tensor(self.action_space.high, device=self.device)
     
 
     def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> torch.Tensor:

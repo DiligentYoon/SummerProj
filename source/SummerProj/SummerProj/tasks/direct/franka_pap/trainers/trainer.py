@@ -76,9 +76,9 @@ class HRLTrainer(Trainer):
         self.current_high_level_action = torch.zeros((self.env.num_envs, 1), dtype=torch.long, device=self.env.device)
         self.needs_new_high_level_action = True
         self.h_start_states = {
-            "observation": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space["observation"].shape[-1]), 
+            "observation": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space.shape[-1]), 
                                        device=self.env.device, dtype=torch.float32),
-            "desired_goal": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space["desired_goal"].shape[-1]), 
+            "desired_goal": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space.shape[-1]), 
                                         device=self.env.device, dtype=torch.float32)
         }
         self.h_actions = torch.zeros((self.env.num_envs, 1), device=self.env.device)
@@ -89,13 +89,13 @@ class HRLTrainer(Trainer):
         self.max_episode_buffer_length = env._unwrapped.max_episode_length
         
         self.episode_buffer = EpisodeWiseReplayBuffer(self.max_episode_buffer_length, self.env.num_envs, self.env.device)
-        self.episode_buffer.create_tensor("states", size=low_level_obs_space["policy"]["observation"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("states", size=self.env._unwrapped.observation_space, dtype=torch.float32)
         self.episode_buffer.create_tensor("sub_goal", size=self.env._unwrapped.cfg.low_level_goal_dim, dtype=torch.float32)
         self.episode_buffer.create_tensor("final_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,dtype=torch.float32)
-        self.episode_buffer.create_tensor("action", size=low_level_action_space["policy"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("action", size=low_level_action_space, dtype=torch.float32)
         self.episode_buffer.create_tensor("reward", size=1, dtype=torch.float32)
         self.episode_buffer.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim, dtype=torch.float32)
-        self.episode_buffer.create_tensor("next_states", size=low_level_obs_space["policy"]["observation"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("next_states", size=self.env._unwrapped.observation_space, dtype=torch.float32)
         self.episode_buffer.create_tensor("terminated", size=1, dtype=torch.bool)
         self.episode_buffer.create_tensor("truncated", size=1, dtype=torch.bool)
 

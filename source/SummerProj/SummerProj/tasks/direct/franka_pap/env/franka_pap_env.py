@@ -34,18 +34,8 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
 
         # Observation Buffer
         self.obs_buf = {
-            "policy": {
-                "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
-                "desired_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
-                # "achieved_goal": torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device),
-                # "final_goal": torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), device=self.device),
-                # "sub_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
-            },
-            "critic":{
-                "observation": torch.zeros((self.num_envs, self.cfg.observation_space), device=self.device),
-                "desired_goal": torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device),
-                "taken_action": torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
-            }
+            "policy": torch.zeros((self.num_envs, self.cfg.observation_space+self.cfg.low_level_goal_dim), device=self.device),
+            "critic": torch.zeros((self.num_envs, self.cfg.observation_space+self.cfg.low_level_goal_dim+self.cfg.action_space), device=self.device)
         }
 
         # Controller Commands & Scene Entity
@@ -199,12 +189,11 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         
         
     def _get_rewards(self):
-
         # === 저 수준 (Low-Level)에 대한 보상 계산 ===
-        loc_to_subgoal = torch.norm(self.obs_buf["policy"]["achieved_goal"][:, :3] - \
-                                    self.obs_buf["policy"]["desired_goal"][:, :3], dim=1)
-        rot_to_subgoal = quat_error_magnitude(self.obs_buf["policy"]["achieved_goal"][:, 3:7], 
-                                              self.obs_buf["policy"]["desired_goal"][:, 3:7])
+        loc_to_subgoal = torch.norm(self.extras["achieved_goal"][:, :3] - \
+                                    self.extras["low_level_goal"][:, :3], dim=1)
+        rot_to_subgoal = quat_error_magnitude(self.extras["achieved_goal"][:, 3:7], 
+                                              self.extras["low_level_goal"][:, 3:7])
 
         reward_low = torch.where(torch.logical_and(
             loc_to_subgoal < self.cfg.low_level_loc_threshold,
@@ -242,27 +231,9 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
                 goal_pos_tcp,
             ), dim=1
         )
-        achieved_goal = torch.cat(
-            (   
-                # robot grasp pos w.r.t Root frame (7)
-                self.robot_grasp_pos_b[:, :7],
-                # gripper joint pos (2)
-                self.robot_joint_pos[:, 7:]
-            ), dim=1
-        )
         
-        obs_buf_1 = {
-            "observation": low_level_obs,
-            "desired_goal": self.low_level_goals,
-            # "final_goal": self.high_level_goals,
-            # "sub_goal": self.low_level_goals,
-        }
-
-        obs_buf_2 = {
-            "observation": low_level_obs,
-            "desired_goal": self.low_level_goals,
-            "taken_action": self.actions
-        }
+        obs_buf_1 = torch.cat((low_level_obs, self.low_level_goals), dim=1)
+        obs_buf_2 = torch.cat((low_level_obs, self.low_level_goals, self.actions), dim=1)
 
         self.obs_buf["policy"] = obs_buf_1
         self.obs_buf["critic"] = obs_buf_2
@@ -369,7 +340,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
     # ==============================================================================
     # ========================= Function for HRL ===================================
     # ==============================================================================
-    def _update_extra_infos(self, env_ids: torch.Tensor) -> None:
+    def _update_extra_infos(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
             env_ids = self._robot._ALL_INDICES
 
