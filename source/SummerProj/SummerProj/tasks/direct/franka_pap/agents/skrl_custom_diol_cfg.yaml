@@ -70,19 +70,18 @@ agent:
     random_timesteps: 1000 # 초기 랜덤 탐험 스텝
     learning_starts: 1000  # 학습 시작 전 최소 경험 수
 
-    "exploration": 
+    exploration: 
         "initial_epsilon": 1.0,       # initial epsilon for epsilon-greedy exploration
         "final_epsilon": 1e-5,        # final epsilon for epsilon-greedy exploration
         "timesteps": 1000,            # timesteps for epsilon-greedy decay
     
-
     experiment:
       directory: "franka_pap"
       experiment_name: ""
       write_interval: auto
       checkpoint_interval: auto
 
-  # 3-2. 저수준 에이전트 (skrl의 DDPG)
+  # 3-2. 저수준 에이전트
   low_level:
     class: DDPG
     gradient_steps: 1
@@ -105,19 +104,19 @@ agent:
 
     grad_norm_clip: 1.0
 
-  # logging and checkpoint
-  experiment:
-    directory: "franka_pap"
-    experiment_name: ""
-    write_interval: auto
-    checkpoint_interval: auto
+    # logging and checkpoint
+    experiment:
+      directory: "franka_pap"
+      experiment_name: ""
+      write_interval: auto
+      checkpoint_interval: auto
 
 
 # Trainer
 # https://skrl.readthedocs.io/en/latest/api/trainers/
 trainer:
   _target_: SummerProj.tasks.direct.franka_pap.trainers.trainer.HRLTrainer
-  timesteps: 100000
+  timesteps: null
   epoch_interval: 1
   cycle_interval: 50
   episode_interval: 16

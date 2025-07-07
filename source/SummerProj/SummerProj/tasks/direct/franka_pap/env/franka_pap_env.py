@@ -25,6 +25,13 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
     def __init__(self, cfg: FrankaPapEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
+        # Extras Info
+        self.extras["high_level_reward"] = torch.zeros((self.num_envs, 1), device=self.device)
+        self.extras["option_terminated"] = torch.zeros((self.num_envs, 1), dtype=torch.bool, device=self.device)
+        self.extras["low_level_goal"] = torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
+        self.extras["high_level_goal"] = torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), device=self.device)
+        self.extras["achieved_goal"] = torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device)
+
         # Observation Buffer
         self.obs_buf = {
             "policy": {
@@ -89,43 +96,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self._object = RigidObject(self.cfg.object)
         self.scene.rigid_objects["object"] = self._object
         super()._setup_scene()
-
-    
-    # def _configure_gym_env_spaces(self):
-    #     self.single_action_space =  gym.spaces.Dict({
-    #         "high_level": gym.spaces.Discrete(self.cfg.high_level_action_dim),
-    
-    #         "low_level": gym.spaces.Dict({
-    #             "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
-    #             "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
-    #         })
-    #     })
-
-    #     self.single_observation_space = gym.spaces.Dict({
-    #         "high_level": gym.spaces.Dict({
-    #             "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-    #             "desired_goal": gym.spaces.MultiBinary(self.cfg.high_level_goal_dim)
-    #         }),
-
-    #         "low_level": gym.spaces.Dict({
-    #             "policy": gym.spaces.Dict({
-    #                 "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-    #                 "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,))
-    #             }),
-    #             "critic": gym.spaces.Dict({
-    #                 "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
-    #                 "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.low_level_goal_dim,)),
-    #                 "taken_action": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
-    #             })
-    #         }),
-    #     })
-
-    #     self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
-    #     self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
-
-    #     self.actions = sample_space(self.single_action_space, self.device, batch_size=self.num_envs, fill_value=0)
         
-
 
     # ================= IK + Controller Gain =================
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
@@ -215,11 +186,14 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         
     
     def _get_dones(self):
+        # high-level done과 low-level done을 모두 계산
+        # return값은 에피소드 종료에 영향을 주는 high-level condition만 포함
         self._compute_intermediate_values()
-        truncated = self.episode_length_buf >= self.max_episode_length - 1
+        self._update_extra_infos()
+
+        # ========= high-level termination signal ==========
         terminated = (self.extras["high_level_reward"] == 0.0)
-        option_terminated = (self.reward_buf == 0.0)
-        self.extras["option_terminated"] = option_terminated
+        truncated = self.episode_length_buf >= self.max_episode_length - 1
 
         return terminated, truncated
         
@@ -237,23 +211,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
             rot_to_subgoal < self.cfg.low_level_rot_threshold,
         ), 0.0, -1.0)
 
-        # === 고 수준 (High-Level)에 대한 보상 계산 ===
-        current_object_pos_w = self._object.data.root_state_w[:, :7]
-        target_block_pos_w = self.goal_pos_w[:, :7]
-
-        loc_to_final_goal = torch.norm(current_object_pos_w[:, :3] - target_block_pos_w[:, :3], dim=-1) # [N x M x 1]
-        rot_to_final_goal = quat_error_magnitude(current_object_pos_w[:, 3:7], target_block_pos_w[:, 3:7]) # [N x M x 1]
-
-        all_block_reached = torch.logical_and(
-            torch.all(loc_to_final_goal < self.cfg.high_level_loc_threshold, dim=-1),
-            torch.all(rot_to_final_goal < self.cfg.high_level_loc_rot_threshold, dim=-1)
-        )
-        reward_high = torch.where(all_block_reached, 0.0, -1.0)
-
-        # === 계산된 고 수준 보상 저장 : 환경 외부에서 처리 ===
-        self.extras["high_level_reward"] = reward_high
-
-        # === 계산된 저 수준 보상 리턴 : 환경 내부에서 처리 ===
+        # ===== 계산된 저 수준 보상만 리턴 : 환경 내부에서 처리 =====
         return reward_low
     
 
@@ -270,7 +228,6 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
         goal_pos_tcp = torch.cat([object_loc_tcp, object_rot_tcp], dim=1)
         
-        # To Do : Low-Level Goal 기반으로 관측 구성해야 함 특히, goal_pos_b와 goal_pos_tcp를 수정해야 함
         low_level_obs = torch.cat(
             (   
                 # robot joint pose (7+2 = 9)
@@ -296,7 +253,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         
         obs_buf_1 = {
             "observation": low_level_obs,
-            "desired_goal": achieved_goal,
+            "desired_goal": self.low_level_goals,
             # "final_goal": self.high_level_goals,
             # "sub_goal": self.low_level_goals,
         }
@@ -347,6 +304,7 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         
         # ====== State Buffer Update ======
         self._compute_intermediate_values(env_ids)
+        self._update_extra_infos(env_ids)
 
     
     def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None):
@@ -405,7 +363,51 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         jacobian_b[:, 3:, :] = torch.bmm(matrix_from_quat(self.tcp_offset_hand[:, 3:7]), jacobian_b[:, 3:, :])
 
         return jacobian_b
-    
+
+
+
+    # ==============================================================================
+    # ========================= Function for HRL ===================================
+    # ==============================================================================
+    def _update_extra_infos(self, env_ids: torch.Tensor) -> None:
+        if env_ids is None:
+            env_ids = self._robot._ALL_INDICES
+
+        self.extras["high_level_reward"] = self.get_high_level_reward(env_ids)
+        self.extras["option_terminated"][env_ids] = (self.reward_buf[env_ids] == 0.0).unsqueeze_(1)
+        self.extras["low_level_goal"][env_ids] = self.low_level_goals[env_ids]
+        self.extras["high_level_goal"][env_ids] = self.high_level_goals[env_ids]
+        self.extras["achieved_goal"][env_ids] = self.achieved_goals[env_ids]
+
+
+
+    def get_high_level_reward(self, env_ids: torch.Tensor) -> torch.Tensor:
+            current_tcp_pos_w = self.robot_grasp_pos_w[env_ids]
+            current_object_pos_w = self._object.data.root_state_w[env_ids, :7]
+            target_robot_pos_w = self.high_level_goals[env_ids, :7]
+            target_block_pos_w = self.high_level_goals[env_ids, 7:]
+
+            # ======= object condition check =======
+            loc_to_final_goal = torch.norm(current_object_pos_w[:, :3] - target_block_pos_w[:, :3], dim=-1) # [env_ids x 1]
+            rot_to_final_goal = quat_error_magnitude(current_object_pos_w[:, 3:7], target_block_pos_w[:, 3:7]) # [env_ids x 1]
+
+            # ====== robot condition check =======
+            loc_to_final_goal_robot = torch.norm(current_tcp_pos_w[:, :3] - target_robot_pos_w[:, :3], dim=-1)
+            rot_to_final_goal_robot = quat_error_magnitude(current_tcp_pos_w[:, 3:7], target_robot_pos_w[:, 3:7])
+
+            all_block_reached = torch.logical_and(
+                loc_to_final_goal < self.cfg.high_level_loc_threshold,
+                rot_to_final_goal < self.cfg.high_level_rot_threshold
+            )
+
+            robot_reached = torch.logical_and(
+                loc_to_final_goal_robot < self.cfg.high_level_loc_threshold,
+                rot_to_final_goal_robot < self.cfg.high_level_rot_threshold
+            )
+            
+            return torch.where(torch.logical_and(all_block_reached, robot_reached), 0.0, -1.0)
+
+
     
     def _map_high_level_action_to_low_level_goal(self, high_level_action: torch.Tensor, current_obs: dict) -> torch.Tensor:
         """Mapping a discrete high-level action to a continuous low-level goal state."""
@@ -478,11 +480,12 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         return low_level_goals
 
 
-    # =============== External Called Methods ==================
 
     def set_low_level_goals(self, goals: torch.Tensor):
         """저수준 목표(sub-goal)를 설정하기 위한 인터페이스"""
         self.low_level_goals = goals.to(self.device)
+
+
 
     def set_high_level_goals(self):
         """에피소드의 최종 목표를 설정하기 위한 인터페이스"""

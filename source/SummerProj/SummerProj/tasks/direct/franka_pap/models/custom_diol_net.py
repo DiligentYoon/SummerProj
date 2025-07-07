@@ -15,8 +15,9 @@ class FrankaDeterministicPolicy(DeterministicMixin, Model):
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions, device)
 
-        obs_dim = observation_space["observation"].shape[0]
-        goal_dim = observation_space["desired_goal"].shape[0]
+        obs_dim = observation_space["observation"].shape[-1]
+        goal_dim = observation_space["desired_goal"].shape[-1]
+        action_dim = action_space.shape[-1]
         in_features = obs_dim + goal_dim
         
         # Backbone
@@ -36,9 +37,9 @@ class FrankaDeterministicPolicy(DeterministicMixin, Model):
             in_features_policy = out_features
         self.policy_branch = nn.Sequential(*policy_layers)
         
-        self.action_head = nn.Linear(in_features_policy, self.num_actions)
+        self.action_head = nn.Linear(in_features_policy, action_dim)
 
-    def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
+    def compute(self, inputs: dict, role: str = "policy") -> tuple[torch.Tensor, ...]:
         obs = inputs["states"]["policy"]["observation"]
         goal = inputs["states"]["policy"]["desired_goal"]
         x = self.encoder(torch.cat((obs, goal), dim=-1))
@@ -56,9 +57,9 @@ class FrankaValue(Model):
         
         Model.__init__(self, observation_space, action_space, device)
         
-        obs_dim = observation_space["observation"].shape[0]
-        goal_dim = observation_space["desired_goal"].shape[0]
-        action_dim = observation_space["taken_action"].shape[0]
+        obs_dim = observation_space["observation"].shape[-1]
+        goal_dim = observation_space["desired_goal"].shape[-1]
+        action_dim = observation_space["taken_action"].shape[-1]
 
         # Backbone
         in_features_encoder = obs_dim + goal_dim + action_dim
@@ -79,12 +80,12 @@ class FrankaValue(Model):
         self.value_branch = nn.Sequential(*value_layers)
         self.value_head = nn.Linear(in_features_value, 1)
 
-    def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
+    def compute(self, inputs: dict, role: str = "critic") -> tuple[torch.Tensor, ...]:
         obs = inputs["states"]["critic"]["observation"]
         goal = inputs["states"]["critic"]["desired_goal"]
         actions = inputs["taken_actions"]
-        x = self.encoder(torch.cat((obs, goal), dim=-1))
-        v = self.value_branch(torch.cat((x, actions), dim=-1))
+        x = self.encoder(torch.cat((obs, goal, actions), dim=-1))
+        v = self.value_branch(x, dim=-1)
         return self.value_head(v), {}
     
 
@@ -95,8 +96,8 @@ class FrankaQNetwork(Model):
         
         Model.__init__(self, observation_space, action_space, device)
 
-        obs_dim = observation_space["observation"].shape[0]
-        goal_dim = observation_space["desired_goal"].shape[0]
+        obs_dim = observation_space["observation"].shape[-1]
+        goal_dim = observation_space["desired_goal"].shape[-1]
         in_features = obs_dim + goal_dim
         num_actions = action_space.nvec[0]
 
@@ -112,6 +113,9 @@ class FrankaQNetwork(Model):
     
     def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
         # DIOL 에이전트의 관측: Dict 타입에서 추출
-        input = inputs["states"]
+        obs = inputs["states"]["observation"]
+        goal = inputs["states"]["desired_goal"]
+        input = torch.cat((obs, goal), dim=1)
+
         # 네트워크를 통과시켜 모든 행동에 대한 Q-value들을 반환합니다.
         return self.net(input), {}

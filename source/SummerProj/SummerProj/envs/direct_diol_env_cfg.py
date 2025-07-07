@@ -19,5 +19,5 @@ class DirectDIOLCfg(DirectRLEnvCfg):
     low_level_rot_threshold: float = 0.1
 
     high_level_loc_threshold: float = 0.02
-    high_level_loc_rot_threshold: float = 0.1
+    high_level_rot_threshold: float = 0.1
     

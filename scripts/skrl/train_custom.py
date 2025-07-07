@@ -124,6 +124,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # max iterations for training
     if args_cli.max_iterations:
         agent_cfg["trainer"]["timesteps"] = args_cli.max_iterations * agent_cfg["agent"]["rollouts"]
+    
     agent_cfg["trainer"]["close_environment_at_exit"] = False
     # configure the ML framework into the global skrl variable
     if args_cli.ml_framework.startswith("jax"):
@@ -139,25 +140,34 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.seed = agent_cfg["seed"]
 
     # specify directory for logging experiments
-    log_root_path = os.path.join("logs", "skrl", agent_cfg["agent"]["experiment"]["directory"])
+    log_root_path = os.path.join("logs", "skrl", agent_cfg["agent"]["high_level"]["experiment"]["directory"])
     log_root_path = os.path.abspath(log_root_path)
-    print(f"[INFO] Logging experiment in directory: {log_root_path}")
-    # specify directory for logging runs: {time-stamp}_{run_name}
-    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_{algorithm}_{args_cli.ml_framework}"
-    print(f"Exact experiment name requested from command line {log_dir}")
-    if agent_cfg["agent"]["experiment"]["experiment_name"]:
-        log_dir += f'_{agent_cfg["agent"]["experiment"]["experiment_name"]}'
-    # set directory into agent config
-    agent_cfg["agent"]["experiment"]["directory"] = log_root_path
-    agent_cfg["agent"]["experiment"]["experiment_name"] = log_dir
-    # update log_dir
-    log_dir = os.path.join(log_root_path, log_dir)
+    print(f"[INFO] Logging HRL experiment in base directory: {log_root_path}")
 
-    # dump the configuration into log-directory
-    dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
+    experiment_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_{algorithm}_{args_cli.ml_framework}"
+
+    if agent_cfg["agent"]["high_level"]["experiment"]["experiment_name"]:
+        experiment_name += f'_{agent_cfg["agent"]["high_level"]["experiment"]["experiment_name"]}'
+    print(f"Generated unique experiment name: {experiment_name}")
+
+    for level in ["high_level", "low_level"]:
+        if level in agent_cfg["agent"]:
+            print(f"Updating configuration for {level} agent...")
+            agent_cfg["agent"][level]["experiment"]["directory"] = log_root_path
+            agent_cfg["agent"][level]["experiment"]["experiment_name"] = experiment_name
+
+    log_dir = os.path.join(log_root_path, experiment_name)
+
+    os.makedirs(os.path.join(log_dir, "params"), exist_ok=True)
+
+    print(f"Dumping configuration files to: {os.path.join(log_dir, 'params')}")
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
+    dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
+    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
+
+    # get checkpoint path (to resume training)
+    resume_path = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None
 
     # get checkpoint path (to resume training)
     resume_path = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None

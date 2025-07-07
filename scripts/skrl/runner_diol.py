@@ -39,7 +39,7 @@ class AISLDIOLRunner(Runner):
         # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
         single_high_level_observation_space = gym.spaces.Dict({
             "observation": env._unwrapped.single_observation_space["policy"]["observation"],
-            "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
+            "desired_goal": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(env._unwrapped.cfg.high_level_goal_dim,))
         })
         single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
 
@@ -91,7 +91,7 @@ class AISLDIOLRunner(Runner):
                     model_config["action_space"] = low_level_action_space["policy"]
                 else:
                     model_config["observation_space"] = low_level_observation_space["critic"]
-                    model_config["action_space"] = low_level_action_space["critic"]
+                    model_config["action_space"] = 1
                 model_config["device"] = device
                 models["low_level"][role] = hydra.utils.instantiate(model_config)
                 print(f"  - Instantiated low-level model for role: '{role}'")

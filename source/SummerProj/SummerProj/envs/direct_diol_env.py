@@ -45,10 +45,7 @@ class DirectDIOL(DirectRLEnv):
 
         # ============== Environment Agent (Low-Level) spaces ===============
         # set up spaces
-        self.single_action_space = gym.spaces.Dict({
-            "policy": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,)),
-            "critic": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(1,))
-        })
+        self.single_action_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
         self.single_observation_space = gym.spaces.Dict({
             "policy": gym.spaces.Dict({
                 "observation": gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space,)),
@@ -64,6 +61,7 @@ class DirectDIOL(DirectRLEnv):
         # set up batched spaces
         self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
         self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
+        self.state_space = gym.vector.utils.batch_space(self.single_observation_space["critic"], self.num_envs)
 
         self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)
 
