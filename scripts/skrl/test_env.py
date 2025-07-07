@@ -139,7 +139,7 @@ def main(env_cfg: dict, agent_cfg: dict):
     # __init__, _generate_models, _generate_agent, _generate_trainer가 모두 호출됩니다.
     print("\n[DEBUG] Instantiating AISLDIOLRunner...")
     runner = AISLDIOLRunner(env, agent_cfg)
-    print("✅ AISLDIOLRunner and its components instantiated successfully!")
+    print("✅ [AISLRunner] Runner Class and its components are instantiated successfully!")
 
     # --- 생성된 객체 확인 ---
     print("\n--- Verifying generated components ---")

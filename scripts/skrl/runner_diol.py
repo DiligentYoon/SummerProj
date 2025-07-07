@@ -93,6 +93,8 @@ class AISLDIOLRunner(Runner):
                 print(f"  - Instantiated low-level model for role: '{role}'")
             else:
                 ValueError(f"No '_target_' field defined")
+        
+        print("✅ [INFO] Models are instatiated successfully !")
 
         return models
 
@@ -190,6 +192,8 @@ class AISLDIOLRunner(Runner):
         agents["high_level"] = self.high_level_agent
         agents["low_level"] = self.low_level_agent
 
+        print("✅ [INFO] Agents are instatiated successfully !")
+
         return agents
     
     
@@ -227,6 +231,8 @@ class AISLDIOLRunner(Runner):
             
             # HRLTrainer에 환경과 두 에이전트를 모두 전달하여 생성합니다.
             return trainer_class(env=env, agents=agents, cfg=trainer_cfg)
+
+        
         
     
     # ============== 보조 함수 ===============
