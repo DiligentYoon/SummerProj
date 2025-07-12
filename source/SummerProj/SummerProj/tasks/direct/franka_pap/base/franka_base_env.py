@@ -36,7 +36,8 @@ class FrankaBaseEnv(DirectRLEnv):
         self.left_finger_joint_idx = self._robot.find_joints("panda_finger_joint1")[0][0]
         self.right_finger_link_idx = self._robot.find_bodies("panda_rightfinger")[0][0]
         self.right_finger_joint_idx = self._robot.find_joints("panda_finger_joint2")[0][0]
-        self.finger_open_joint_pos = torch.full((self.scene.num_envs, 2), 0.04, device=self.scene.device)
+        self.finger_open_joint_pos =  0.04 * torch.ones((self.num_envs, 2), device=self.device)
+        self.finger_close_joint_pos = torch.zeros(1, device=self.device)
 
         # Physics Limits
         self.num_active_joints = len(self.joint_idx)
@@ -86,7 +87,7 @@ class FrankaBaseEnv(DirectRLEnv):
 
         spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=(0.0, 0.0, -1.05))
         spawn = self.cfg.table.spawn
-        spawn.func(self.cfg.table.prim_path, spawn, translation=(0.5, 0.0, 0.0), orientation=(0.707, 0.0, 0.0, 0.707))
+        spawn.func(self.cfg.table.prim_path, spawn, translation=(0.0, 0.0, 0.0), orientation=(1.0, 0.0, 0.0, 0.0))
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
 

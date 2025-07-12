@@ -11,6 +11,7 @@ from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms,
                                 combine_frame_transforms, quat_from_angle_axis, quat_mul, quat_inv, sample_uniform, saturate, \
                                 matrix_from_quat, quat_apply
 from isaaclab.markers import VisualizationMarkers
+from isaaclab.assets import RigidObject
 
 from ..base.franka_base_env import FrankaBaseEnv
 from .franka_grasp_env_cfg import FrankaGraspEnvCfg
@@ -27,6 +28,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.processed_actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self.imp_commands = torch.zeros((self.num_envs, self.imp_controller.num_actions), device=self.device)
         self.ik_commands = torch.zeros((self.num_envs, self.ik_controller.action_dim), device=self.device)
+        self.gripper_commands = torch.zeros((self.num_envs, 2), device=self.device)
 
         # Parameter for IK Controller
         if self._robot.is_fixed_base:
@@ -38,6 +40,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.goal_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.goal_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
 
+
         # Robot and Object Grasp Poses
         self.robot_grasp_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.robot_grasp_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
@@ -48,6 +51,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.loc_error = torch.zeros(self.num_envs, device=self.device)
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.is_grasp = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         # Domain Randomization Scale
         self.noise_scale = torch.tensor(
@@ -56,20 +60,26 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
-        self.via_marker = VisualizationMarkers(self.cfg.via_pos_marker_cfg)
+
+
+    def _setup_scene(self):
+        self._object = RigidObject(self.cfg.object)
+        self.scene.rigid_objects["object"] = self._object
+        super()._setup_scene()
+
 
 
     # ================= IK + Controller Gain =================
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         """
-        actions.shape  =  (N, 21)
+        actions.shape  =  (N, 20)
         0:7      →  Delta Joint angle for Impedance Control (rad)
         7:14     →  Joint-stiffness for Impedance Control   (N·m/rad)
         14:21    →  Damping-ratio for Impedance Control     (-)
         """
         self.actions = actions.clone()
         # ── 슬라이스 & 즉시 in-place clip ──────────────────────────
-        self.processed_actions[:, :7] = torch.clamp(self.actions[: :7] * self.cfg.joint_res_clipping,
+        self.processed_actions[:, :7] = torch.clamp(self.actions[:, :7] * self.cfg.joint_res_clipping,
                                                     self.robot_dof_res_lower_limits,
                                                     self.robot_dof_res_upper_limits)
         self.processed_actions[:, 7:14] = torch.clamp(self.actions[:, 7:14] * self.cfg.stiffness_scale,
@@ -78,6 +88,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.processed_actions[:, 14:] = torch.clamp(self.actions[:, 14:] * self.cfg.damping_scale,
                                                      self.robot_dof_damping_lower_limits,
                                                      self.robot_dof_damping_upper_limits) 
+        # self.processed_actions[:, 20] = torch.where(self.actions[:, 20] < 0, self.finger_close_joint_pos, self.finger_open_joint_pos)
         
         # ===== Impedance Controller Gain 세팅 =====
         self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = self.processed_actions[:, 6:13]
@@ -93,10 +104,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         robot_joint_pos = self._robot.data.joint_pos[:, :self.num_active_joints]
         robot_joint_vel = self._robot.data.joint_vel[:, :self.num_active_joints]
 
-        hand_pos_w = self._robot.data.body_state_w[:, self.hand_link_idx, :7]
-        _, hand_rot_b = subtract_frame_transforms(
-            robot_root_pos[:, :3], robot_root_pos[:, 3:7], hand_pos_w[:, :3], hand_pos_w[:, 3:7])
-        robot_grasp_pos_b = calculate_robot_tcp(hand_pos_w, robot_root_pos, self.tcp_offset_hand)
+        # hand_pos_w = self._robot.data.body_state_w[:, self.hand_link_idx, :7]
+        # _, hand_rot_b = subtract_frame_transforms(
+        #     robot_root_pos[:, :3], robot_root_pos[:, 3:7], hand_pos_w[:, :3], hand_pos_w[:, 3:7])
+        # robot_grasp_pos_b = calculate_robot_tcp(hand_pos_w, robot_root_pos, self.tcp_offset_hand)
 
         gen_mass = self._robot.root_physx_view.get_generalized_mass_matrices()[:, :self.num_active_joints, :self.num_active_joints]
         gen_grav = self._robot.root_physx_view.get_gravity_compensation_forces()[:, :self.num_active_joints]
@@ -118,6 +129,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ======== Joint Impedance Regulator ========
         # Joint Clipping for stable Learning (To Do: Residual Curriculum Learning)
         res_joint_pos = self.processed_actions[:, :7]
+        # res_joint_pos = torch.zeros((self.num_envs, 7), device=self.device)
         
         self.imp_commands[:, :self.num_active_joints] = res_joint_pos
         self.imp_controller.set_command(self.imp_commands)
@@ -128,6 +140,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         # ===== Target Torque 버퍼에 저장 =====
         self._robot.set_joint_effort_target(des_torque, joint_ids=self.joint_idx)
+
+        # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
+        self._robot.set_joint_position_target(self.finger_open_joint_pos, 
+                                               joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
+        
         
     def _get_dones(self):
         self._compute_intermediate_values()
@@ -138,7 +155,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_rewards(self):
         # Action Penalty
-        action_norm = torch.norm(self.actions[:, 6:13], dim=1)
+        action_norm = torch.norm(self.actions[:, 7:14], dim=1)
 
         # =========== Approach Reward (1): Potential Based Reward Shaping =============
         # gamma = 1.0
@@ -164,11 +181,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # =========== Success Reward : Goal Reach ============
         r_success = self.is_reach.float()
+
+        # =========== Contact Penalty =================
+        p_contact = torch.norm(self._object.data.root_vel_w, dim=1)
         
         # =========== Summation =============
         reward = self.cfg.w_pos * r_pos + \
                  self.cfg.w_rot * r_rot - \
                  self.cfg.w_penalty * action_norm + \
+                 self.cfg.w_contact * p_contact + \
                  self.cfg.w_success * r_success
 
         # print(f"reward of env1 : {reward[0]}")
@@ -191,9 +212,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         obs = torch.cat(
             (   
-                # robot joint pose (7 not 9)
+                # robot joint pose (7)
                 joint_pos_scaled[:, 0:self.num_active_joints],
-                # robot joint velocity (7 not 9)
+                # robot joint velocity (7)
                 self.robot_joint_vel[:, 0:self.num_active_joints],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,
@@ -218,14 +239,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # object(=target point) reset : Location
         loc_noise_x = sample_uniform(0.3, 0.5, (len(env_ids), 1), device=self.device)
         loc_noise_y = sample_uniform(-0.3, 0.3, (len(env_ids), 1), device=self.device)
-        loc_noise_z = sample_uniform(0.3, 0.5, (len(env_ids), 1), device=self.device)
-        loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
-        object_default_state = torch.zeros_like(self._robot.data.root_state_w[env_ids], device=self.device)
-        object_default_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
+        loc_noise = torch.cat([loc_noise_x, loc_noise_y], dim=-1)
+        object_default_state = torch.zeros_like(self._object.data.root_state_w[env_ids], device=self.device)
+        object_default_state[:, :2] += loc_noise + self.scene.env_origins[env_ids, :2]
     
         # object(=target point) reset : Rotation
-        rot_noise = sample_uniform(-1.0, 1.0, (len(env_ids), 3), device=self.device)
-        # object_default_state[:, 3:7] = self._robot.data.body_state_w[env_ids, self._robot_entity.body_ids[0], 3:7]
+        rot_noise = self.sample_discrete_uniform(low=torch.tensor(-1.0, device=self.device), 
+                                                 high=torch.tensor(1.0, device=self.device),
+                                                 delta=torch.tensor(0.5, device=self.device), 
+                                                 size=(len(env_ids), 2))
         object_default_state[:, 3:7] = randomize_rotation(
             rot_noise[:, 0], rot_noise[:, 1], self.x_unit_tensor[env_ids], self.y_unit_tensor[env_ids]
         )
@@ -239,6 +261,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.goal_pos_w[env_ids] = object_default_state[:, :7]
         self.goal_pos_b[env_ids] = torch.cat([goal_loc_b, goal_rot_b], dim=-1)
         
+        self._object.write_root_pose_to_sim(object_default_state[:, :7], env_ids)
+        self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)
+        
         # Need to refresh the intermediate values so that _get_observations() can use the latest values
         self._compute_intermediate_values(env_ids)
 
@@ -246,6 +271,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
     def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None):
         if env_ids is None:
             env_ids = self._robot._ALL_INDICES
+
 
         # ========= TCP 업데이트 ===========
         root_pos_w = self._robot.data.root_state_w[env_ids, :7]
@@ -257,6 +283,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.robot_grasp_pos_b[env_ids] = calculate_robot_tcp(hand_pos_w, root_pos_w, self.tcp_offset_hand[env_ids])
         self.robot_grasp_pos_w[env_ids, 3:7] = quat_mul(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, 3:7])
         self.robot_grasp_pos_w[env_ids, :3] = root_pos_w[:, :3] + quat_apply(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, :3])
+
+        # ========= Object 업데이트 ==========
+        self.goal_pos_w[env_ids] = self._object.data.root_state_w[env_ids, :7]
+        self.goal_pos_b[env_ids] = torch.cat(subtract_frame_transforms(
+            root_pos_w[:, :3], root_pos_w[:, 3:7], self.goal_pos_w[env_ids, :3], self.goal_pos_w[env_ids, 3:7]
+        ), dim=1)
         
         # ========= Position Error 업데이트 =========
         # Location
@@ -268,7 +300,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], self.goal_pos_b[env_ids, 3:7])
         
         # ======== Visualization ==========
-        self.via_marker.visualize(self.processed_actions[:, :3] + self.robot_grasp_pos_w[:, :3])
         self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
         self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
     
@@ -298,6 +329,17 @@ class FrankaGraspEnv(FrankaBaseEnv):
         return jacobian_b
 
 
+    def sample_discrete_uniform(self,
+                                low:  torch.Tensor | float,
+                                high: torch.Tensor | float, 
+                                delta: torch.Tensor | float, 
+                                size):
+        if isinstance(size, int):
+            size = (size,)
+        # return tensor
+        n_vals = int(torch.round((high - low) / delta).item()) + 1
+        idx = torch.randint(0, n_vals, size, device=self.device, dtype=torch.int64)
+        return idx.to(torch.float32) * delta + low
         
 
 @torch.jit.script

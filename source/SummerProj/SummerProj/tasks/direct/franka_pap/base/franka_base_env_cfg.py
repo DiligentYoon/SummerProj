@@ -166,7 +166,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     # Table
     table = AssetBaseCfg(
         prim_path="/World/envs/env_.*/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0, 0.0], rot=[1.0, 0, 0, 0.0]),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0]),
         spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd",
                                    scale=(1.5, 2.0, 1.0)),
     )
