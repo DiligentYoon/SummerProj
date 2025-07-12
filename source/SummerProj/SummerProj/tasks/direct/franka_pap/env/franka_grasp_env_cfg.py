@@ -21,7 +21,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # env
     episode_length_s = 8.0
     decimation = 10
-    action_space = 20
+    action_space = 21
     observation_space = 35
     state_space = 0
 
