@@ -12,7 +12,7 @@ from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms,
                                 matrix_from_quat, quat_apply
 from isaaclab.markers import VisualizationMarkers
 
-from .franka_base_env import FrankaBaseEnv
+from ..base.franka_base_env import FrankaBaseEnv
 from .franka_reach_env_cfg import FrankaReachEnvCfg
 
 class FrankaReachEnv(FrankaBaseEnv):

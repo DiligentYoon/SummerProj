@@ -13,7 +13,7 @@ from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.utils import configclass
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from .franka_base_env_cfg import FrankaBaseEnvCfg
+from ..base.franka_base_env_cfg import FrankaBaseEnvCfg
 
 
 @configclass

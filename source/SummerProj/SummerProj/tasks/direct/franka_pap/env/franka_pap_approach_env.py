@@ -20,7 +20,7 @@ from isaaclab.markers import VisualizationMarkers
 from isaaclab.controllers import DifferentialIKController
 from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms, quat_conjugate, quat_from_angle_axis, quat_mul, sample_uniform, quat_apply
 
-from .franka_base_env import FrankaBaseEnv
+from ..base.franka_base_env import FrankaBaseEnv
 from .franka_pap_approach_env_cfg import FrankaPapApproachEnvCfg
 
 class FrankaPapApproachEnv(FrankaBaseEnv):
