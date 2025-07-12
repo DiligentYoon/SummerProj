@@ -187,7 +187,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # =========== Summation =============
         reward = self.cfg.w_pos * r_pos + \
                  self.cfg.w_rot * r_rot - \
-                 self.cfg.w_penalty * action_norm + \
+                 self.cfg.w_penalty * action_norm - \
                  self.cfg.w_contact * p_contact + \
                  self.cfg.w_success * r_success
 
