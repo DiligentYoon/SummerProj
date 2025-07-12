@@ -28,7 +28,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.processed_actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self.imp_commands = torch.zeros((self.num_envs, self.imp_controller.num_actions), device=self.device)
         self.ik_commands = torch.zeros((self.num_envs, self.ik_controller.action_dim), device=self.device)
-        self.gripper_commands = torch.zeros((self.num_envs, 2), device=self.device)
+        self.des_joint_angle = torch.zeros((self.num_envs, self.num_active_joints), device=self.device)
 
         # Parameter for IK Controller
         if self._robot.is_fixed_base:
@@ -90,9 +90,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                      self.robot_dof_damping_upper_limits) 
         # self.processed_actions[:, 20] = torch.where(self.actions[:, 20] < 0, self.finger_close_joint_pos, self.finger_open_joint_pos)
         
-        # ===== Impedance Controller Gain 세팅 =====
-        self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = self.processed_actions[:, 6:13]
-        self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = self.processed_actions[:, 13:]
+        # ===== Impedance Controller Parameter 세팅 =====
+        self.imp_commands[:, :self.num_active_joints] = self.processed_actions[:, :7] + self._robot.data.joint_pos[:, :7]
+        self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = self.processed_actions[:, 7:14]
+        self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = self.processed_actions[:, 14:]
+        self.imp_controller.set_command(self.imp_commands)
         
 
     def _apply_action(self) -> None:
@@ -127,12 +129,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #     joint_pos_des = robot_joint_pos.clone()
     
         # ======== Joint Impedance Regulator ========
-        # Joint Clipping for stable Learning (To Do: Residual Curriculum Learning)
-        res_joint_pos = self.processed_actions[:, :7]
+        # res_joint_pos = self.des_joint_angle - robot_joint_pos
         # res_joint_pos = torch.zeros((self.num_envs, 7), device=self.device)
-        
-        self.imp_commands[:, :self.num_active_joints] = res_joint_pos
-        self.imp_controller.set_command(self.imp_commands)
+        # self.imp_commands[:, :self.num_active_joints] = res_joint_pos
         des_torque = self.imp_controller.compute(dof_pos=robot_joint_pos,
                                                  dof_vel=robot_joint_vel,
                                                  mass_matrix=gen_mass,
