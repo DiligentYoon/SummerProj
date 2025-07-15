@@ -44,8 +44,11 @@ def save_cloud(points, colors, labels, out_dir, name):
     pc = o3d.geometry.PointCloud()
     pc.points = o3d.utility.Vector3dVector(points)
     pc.colors = o3d.utility.Vector3dVector(colors)
+    # 데이터 전처리 : Voxelization
+    pc_down = pc.voxel_down_sample(voxel_size=0.05)
+
     os.makedirs(out_dir, exist_ok=True)
-    o3d.io.write_point_cloud(os.path.join(out_dir, f"{name}.ply"), pc)
+    o3d.io.write_point_cloud(os.path.join(out_dir, f"{name}.ply"), pc_down)
     np.save(os.path.join(out_dir, f"{name}_labels.npy"), labels)
     print(f"[✓] 저장: {name}")
 
@@ -100,6 +103,10 @@ async def generate():
                                                                ( 3, 3, 8)),
                         scale       =rep.distribution.uniform(40, 100)
                     )
+
+                    # Intermediate Step : 약간의 물리스텝 적용 -> 물체가 바닥으로 떨어지도록
+                    for _ in range(4):
+                        await rep.orchestrator.step_async()
 
                     # (1-d) 카메라 & 어노테이터
                     cam  = rep.create.camera()
