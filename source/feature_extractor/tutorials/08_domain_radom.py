@@ -36,6 +36,7 @@ VIEWS_PER_SAMPLE   = 4
 RESOLUTION         = (960, 480)
 
 GROUND = "omniverse://localhost/NVIDIA/Assets/Scenes/Templates/Basic/display_riser.usd"
+ID_MAP = {"ground": 1, "object": 2}
 
 # -------------------------------------------------------------- #
 # 2. 저장 유틸

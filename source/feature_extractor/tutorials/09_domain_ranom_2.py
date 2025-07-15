@@ -47,66 +47,68 @@ with rep.new_layer():
     pc_anno = rep.annotators.get("pointcloud")
     pc_anno.attach(rp)
 
-# ------------------------------------------------------------------ #
-# 2. 랜덤라이저 함수 정의
-# ------------------------------------------------------------------ #
-@rep.randomizer.register
-def randomize_scene():
-    # ① 대상 물체 1개 인스턴스화 & 지면 위 배치
-    obj = rep.randomizer.instantiate(OBJECT_PATHS, size=1)
-    with obj:
-        rep.physics.collider(approximation_shape="convexDecomposition")
-        rep.modify.semantics([("class", "object")])
-        rep.randomizer.scatter_2d(surface_prims=[ground], check_for_collisions=True)
-        rep.modify.pose(
-            rotation = rep.distribution.uniform((0, 0, 0), (360, 360, 360)),
-            scale    = rep.distribution.uniform(5.0, 15.0)
-        )
+    # ------------------------------------------------------------------ #
+    # 2. 랜덤라이저 함수 정의
+    # ------------------------------------------------------------------ #
+    def randomize_scene():
+        # ① 대상 물체 1개 인스턴스화 & 지면 위 배치
+        obj = rep.randomizer.instantiate(OBJECT_PATHS, size=1)
+        with obj:
+            rep.physics.collider(approximation_shape="convexDecomposition")
+            rep.modify.semantics([("class", "object")])
+            # rep.randomizer.scatter_2d(surface_prims=[ground], check_for_collisions=True)
+            rep.modify.pose(
+                position = rep.distribution.uniform((1, 1, 1), (5, 5, 3)),
+                rotation = rep.distribution.uniform((0, 0, 0), (360, 360, 360)),
+                scale    = rep.distribution.uniform(5.0, 7.0)
+            )
 
-    return obj.node          # 반환값은 선택 사항이지만 추적용
+        return obj.node          # 반환값은 선택 사항이지만 추적용
 
-@rep.randomizer.register
-def randomize_light():
-    lights = rep.create.light(
-            light_type="Sphere",
-            temperature=rep.distribution.normal(6500, 500),
-            intensity=rep.distribution.normal(35000, 5000),
-            position=rep.distribution.uniform((-300, -300, -300), (300, 300, 300)),
-            scale=rep.distribution.uniform(50, 100),
-            count=1
-        )
-    return lights.node
+    def randomize_light():
+        lights = rep.create.light(
+                light_type="Sphere",
+                temperature=rep.distribution.normal(6500, 500),
+                intensity=rep.distribution.normal(35000, 5000),
+                position=rep.distribution.uniform((-300, -300, -300), (300, 300, 300)),
+                scale=rep.distribution.uniform(50, 100),
+                count=1
+            )
+        return lights.node
 
-@rep.randomizer.register
-def randomize_camera():
-    obj = rep.get.prims(semantics=["class", "object"])
+    def randomize_camera():
+        obj = rep.get.prims(semantics=["class", "object"])
 
-    with cam:
-        rep.modify.pose(
-            position = rep.distribution.uniform((-5, -5, 1), (5, 5, 5)),
-            look_at  = obj      # 아래 트리거에서 obj를 넘겨 받아 갱신해도 OK
-        )
-    return cam.node
+        with cam:
+            rep.modify.pose(
+                position = rep.distribution.uniform((-5, -5, 1), (5, 5, 5)),
+                look_at  = obj      # 아래 트리거에서 obj를 넘겨 받아 갱신해도 OK
+            )
+        return cam.node
+    
+    # Register
+    rep.randomizer.register(randomize_scene)
+    rep.randomizer.register(randomize_light)
+    rep.randomizer.register(randomize_camera)
 
-# ------------------------------------------------------------------ #
-# 3. 트리거: ‘언제’ 랜덤화할지 지정
-# ------------------------------------------------------------------ #
-# ┌──────────── interval=VIEWS_PER_SAMPLE (=4) ────────────┐
-# │ frame 0 1 2 3 | 4 5 6 7 | …                           │
-# │        ↑scene↑          ↑scene↑ …  ← obj & light 갱신 │
-# └────────────────────────────────────────────────────────┘
+    # ------------------------------------------------------------------ #
+    # 3. 트리거: ‘언제’ 랜덤화할지 지정
+    # ------------------------------------------------------------------ #
+    # ┌──────────── interval=VIEWS_PER_SAMPLE (=4) ────────────┐
+    # │ frame 0 1 2 3 | 4 5 6 7 | …                           │
+    # │        ↑scene↑          ↑scene↑ …  ← obj & light 갱신 │
+    # └────────────────────────────────────────────────────────┘
 
-with rep.trigger.on_frame(num_frames=TOTAL_FRAMES, interval=VIEWS_PER_SAMPLE):
-    rep.randomizer.randomize_scene()
-    rep.randomizer.randomize_light()
+    with rep.trigger.on_frame(num_frames=TOTAL_FRAMES, interval=VIEWS_PER_SAMPLE):
+        rep.randomizer.randomize_scene()
+        rep.randomizer.randomize_light()
 
-# 카메라는 매 프레임마다 갱신
+    # 카메라는 매 프레임마다 갱신
 
-with rep.trigger.on_frame(num_frames=TOTAL_FRAMES):
-    rep.randomizer.randomize_camera()
+    with rep.trigger.on_frame(num_frames=TOTAL_FRAMES):
+        rep.randomizer.randomize_camera()
 
-
-# ------------------------------------------------------------------ #
-# 4. 실행 (Replicator Writer가 자동 저장 → 후처리는 기존 방식 재사용)
-# ------------------------------------------------------------------ #
-rep.orchestrator.run()
+    # ------------------------------------------------------------------ #
+    # 4. 실행 (Replicator Writer가 자동 저장 → 후처리는 기존 방식 재사용)
+    # ------------------------------------------------------------------ #
+    rep.orchestrator.run()
