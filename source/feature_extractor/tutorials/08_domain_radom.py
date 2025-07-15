@@ -1,9 +1,9 @@
 """
-Isaac-Sim Replicator: 한 물체를 여러 뷰에서 캡처 → 한 PLY/NPY로 저장
+Isaac‑Sim Replicator: 한 물체를 여러 뷰에서 캡처 → 하나의 PLY·NPY 저장
 ──────────────────────────────────────────────────────────────────────
 • 물체·조명은 샘플마다 한 번만 랜덤 배치
-• 같은 샘플 안에서 카메라만 움직여 여러 뷰를 촬영
-• 뷰별 포인트를 리스트에 append → 하나로 합친 뒤 저장
+• scatter_2d 로 Z‑오프셋을 자동 맞춰 ‘지면에 올려놓음’ ★
+• 같은 샘플 안에서 카메라만 움직여 여러 뷰 촬영
 """
 
 import omni.replicator.core as rep
@@ -11,12 +11,12 @@ import numpy as np, open3d as o3d
 import os, asyncio, random
 
 # -------------------------------------------------------------- #
-# 1. 경로와 파라미터
+# 1. 경로·파라미터
 # -------------------------------------------------------------- #
-BASE_PATH = "C:/SummerProj/Dataset/google_objects_usd"
-SAVE_ROOT = os.path.join(os.getcwd(), "dataset")
+BASE_PATH = os.path.join(os.getcwd(), "Dataset/google_objects_usd")
+SAVE_ROOT = os.path.join(os.getcwd(), "Dataset")
 
-ASSET_LIST = {                      # 카테고리별 USD 상대 경로
+ASSET_LIST = {
     "Mug": [
         "025_mug/025_mug.usd",
         "Room_Essentials_Mug_White_Yellow/Room_Essentials_Mug_White_Yellow.usd",
@@ -31,11 +31,11 @@ ASSET_LIST = {                      # 카테고리별 USD 상대 경로
     ],
 }
 
-SAMPLES_PER_OBJECT = 1    # 물체 재배치(샘플) 횟수
-VIEWS_PER_SAMPLE   = 4    # 한 샘플에서 찍을 뷰 수
+SAMPLES_PER_OBJECT = 2
+VIEWS_PER_SAMPLE   = 4
 RESOLUTION         = (960, 480)
 
-GROUND = 'omniverse://localhost/NVIDIA/Assets/Scenes/Templates/Basic/display_riser.usd'
+GROUND = "omniverse://localhost/NVIDIA/Assets/Scenes/Templates/Basic/display_riser.usd"
 
 # -------------------------------------------------------------- #
 # 2. 저장 유틸
@@ -44,11 +44,9 @@ def save_cloud(points, colors, labels, out_dir, name):
     pc = o3d.geometry.PointCloud()
     pc.points = o3d.utility.Vector3dVector(points)
     pc.colors = o3d.utility.Vector3dVector(colors)
-    # 데이터 전처리 : Voxelization
-    pc_down = pc.voxel_down_sample(voxel_size=0.05)
 
     os.makedirs(out_dir, exist_ok=True)
-    o3d.io.write_point_cloud(os.path.join(out_dir, f"{name}.ply"), pc_down)
+    o3d.io.write_point_cloud(os.path.join(out_dir, f"{name}.ply"), pc)
     np.save(os.path.join(out_dir, f"{name}_labels.npy"), labels)
     print(f"[✓] 저장: {name}")
 
@@ -66,35 +64,27 @@ async def generate():
             # ---------- 샘플 루프 ----------------------------------------
             for s_idx in range(SAMPLES_PER_OBJECT):
 
-                # (1) Replicator 레이어 초기화 – 이전 프림 완전 제거
                 with rep.new_layer(name="Replicator"):
 
-                    # (1-a) 바닥
+                    # (1) 바닥
                     ground = rep.create.from_usd(GROUND)
                     with ground:
-                        # X축 +90° : 세워진 판을 XY 평면에 눕힘
-                        # (+Z-up 스테이지 기준, 필요하면 -90° 로 바꿔 확인)
-                        rep.modify.pose(
-                            rotation=(90, 0, 0),        # (X, Y, Z) Euler [deg]
-                            position=(0, 0, 0)
-                        )
+                        rep.modify.pose(rotation=(90, 0, 0), position=(0, 0, 0))
+                        rep.physics.collider()          # ★ static collider
                         rep.modify.semantics([("class", "ground")])
-                        rep.physics.collider()
 
-                    # (1-b) 물체 – 샘플마다 한 번 배치
+                    # (2) 물체
                     obj = rep.create.from_usd(usd_path)
                     with obj:
+                        rep.physics.collider(approximation_shape="convexDecomposition")
                         rep.modify.semantics([("class", "object")])
                         rep.modify.pose(
-                            position=rep.distribution.uniform((-0.25, 0, 1.0),
-                                                               (0.25, 0.4, 3.0)),
-                            rotation=rep.distribution.uniform((0, 0, 0),
-                                                               (360, 360, 360)),
-                            scale   =rep.distribution.uniform(5.0, 10.0)
+                            position=rep.distribution.uniform((0, 0, 1), (0, 0, 2)),
+                            rotation=rep.distribution.uniform((0, 0, 0), (360, 360, 360)),
+                            scale=rep.distribution.uniform(5.0, 15.0)
                         )
-                        rep.physics.collider()
 
-                    # (1-c) 조명 – 샘플마다 한 번 배치
+                    # (3) 조명 – 샘플마다 한 번 배치
                     rep.create.light(
                         light_type="Sphere",
                         intensity   =rep.distribution.normal(3.5e4, 5e3),
@@ -104,11 +94,7 @@ async def generate():
                         scale       =rep.distribution.uniform(40, 100)
                     )
 
-                    # Intermediate Step : 약간의 물리스텝 적용 -> 물체가 바닥으로 떨어지도록
-                    for _ in range(4):
-                        await rep.orchestrator.step_async()
-
-                    # (1-d) 카메라 & 어노테이터
+                    # (4) 카메라·어노테이터
                     cam  = rep.create.camera()
                     rp   = rep.create.render_product(cam, RESOLUTION)
                     anno = rep.annotators.get("pointcloud")
@@ -133,7 +119,7 @@ async def generate():
                         cols.append(pc["info"]["pointRgb"][:, :3] / 255.0)
                         lbls.append(pc["info"]["pointSemantic"])
 
-                # ---------- 한 샘플의 모든 뷰 → 하나로 저장 --------------
+                # ---------- 뷰 → 하나로 저장 -------------------------
                 if pts:
                     pts  = np.concatenate(pts,  axis=0)
                     cols = np.concatenate(cols, axis=0)
