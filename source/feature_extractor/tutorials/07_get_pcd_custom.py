@@ -55,6 +55,7 @@ async def export_pc(category:str, usd_rel:str):
     for pos in CAM_POS:
         with cam: rep.modify.pose(position=pos, look_at=obj)
         await rep.orchestrator.step_async()
+        
         pc = anno.get_data()
         if pc["data"].size == 0: continue
         pts.append(pc["data"])

@@ -6,9 +6,13 @@ Isaac‑Sim Replicator: 한 물체를 여러 뷰에서 캡처 → 하나의 PLY�
 • 같은 샘플 안에서 카메라만 움직여 여러 뷰 촬영
 """
 
+from pxr import Gf
+import omni.usd
 import omni.replicator.core as rep
 import numpy as np, open3d as o3d
-import os, asyncio, random
+import os, asyncio, random, math
+import omni.physx as physx
+
 
 # -------------------------------------------------------------- #
 # 1. 경로·파라미터
@@ -65,7 +69,7 @@ async def generate():
             for s_idx in range(SAMPLES_PER_OBJECT):
                 with rep.new_layer(name="Replicator"):
 
-                    # 1. 씬의 기본 요소들을 '미리' 생성합니다. (랜덤화 없이)
+                    # 1. 생성 단계: 프리미티브를 만듭니다.
                     ground = rep.create.from_usd(GROUND, semantics=[("class", "ground")])
                     with ground:
                         rep.modify.pose(rotation=(90, 0, 0), position=(0, 0, 0))
@@ -73,83 +77,105 @@ async def generate():
 
                     obj = rep.create.from_usd(usd_path, semantics=[("class", "object")])
                     with obj:
-                        # 안정성을 위해 convexHull 사용을 고려해볼 수 있습니다.
-                        rep.physics.collider(approximation_shape="convexDecomposition")
+                        # rep.physics.rigid_body(velocity=rep.distribution.uniform((-0,0,-0),(0,0,0)))
+                        rep.physics.collider(approximation_shape="convexHull")
                     
                     light = rep.create.light(light_type="Sphere")
-
+                    
                     cam  = rep.create.camera()
                     rp   = rep.create.render_product(cam, RESOLUTION)
-                    anno = rep.annotators.get("pointcloud")
-                    anno.attach(rp)
-                    id_anno = rep.annotators.get("semantic_segmentation")
-                    id_anno.attach(rp)
+                    anno = rep.annotators.get("pointcloud"); anno.attach(rp)
+                    id_anno = rep.annotators.get("semantic_segmentation"); id_anno.attach(rp)
 
-                    # 2. 랜덤화 로직을 함수로 '정의'합니다.
-                    def randomize_environment():
-                        # 객체 랜덤화
-                        with obj:
-                            rep.modify.pose( # 회전 및 크기
-                                position=rep.distribution.uniform((0, 0, 1), (0, 0, 2)),
-                                rotation=rep.distribution.uniform((0, 0, 0), (360, 360, 360)),
-                                scale=rep.distribution.uniform(5.0, 15.0)
-                            )
+                    # 2. ★★★ Python random으로 모든 랜덤 값 미리 계산 ★★★
+                    # 객체 랜덤값
+                    obj_pos = (random.uniform(-150, 150), random.uniform(-150, 150), random.uniform(5.0, 10.0))
+                    obj_rot = (random.uniform(0, 360), random.uniform(0, 360), random.uniform(0, 360))
+                    # 스케일도 너무 커지지 않게 조정
+                    obj_scale = (random.uniform(1.0, 10.0),) * 3
 
-                        with light:
-                            rep.modify.attribute("intensity", rep.distribution.normal(3.5e4, 5e3))
-                            rep.modify.attribute("colorTemperature", rep.distribution.normal(6500, 400))
-                            rep.modify.pose(
-                                position=rep.distribution.uniform((-3, -3, 4), (3, 3, 8)),
-                                scale=rep.distribution.uniform(40, 100)
-                            )
-                        
-                        return obj.node
+                    # 조명 랜덤값
+                    light_pos = (random.uniform(-300, 300), random.uniform(-300, 300), random.uniform(400, 800))
+                    light_intensity = random.normalvariate(35000, 5000)
+                    light_temp = random.normalvariate(6500, 400)
+
+                    # 3. ★★★ 계산된 '고정값'으로 씬을 직접 수정 ★★★
+                    with obj:
+                        rep.modify.pose(position=obj_pos, rotation=obj_rot, scale=obj_scale)
+
+                    with light:
+                        rep.modify.pose(position=light_pos)
+                        rep.modify.attribute("intensity", light_intensity)
+                        rep.modify.attribute("colorTemperature", light_temp)
                     
-                    def capture_view():
-                        with cam:
-                            rep.modify.pose(
-                                position=rep.distribution.uniform((-400, -400, 100), (400, 400, 500)),
-                                look_at=obj
-                            )
+                    print(f"Object Position (before): {obj_pos}")
 
-                    # 3. 정의한 함수를 Replicator에 '등록'합니다.
-                    rep.randomizer.register(randomize_environment)
-                    # rep.randomizer.register(capture_view)
-                    print(f"[INFO] Env randomizer is registered.")
-                    # rep.randomizer.register(sphere_lights)
-                    print(f"[INFO] Light randomizer is registered.")
-                    # 4. 트리거를 통해 등록된 함수를 '실행'합니다. (샘플 당 1회)
-                    with rep.trigger.on_frame(max_execs=1):
-                        print(f"[INFO] apply domain randomization.")
-                        rep.randomizer.randomize_environment()
-                        # rep.randomizer.sphere_lights()
-                        print(f"[INFO] complete")
+                    # 물리 안정화가 필요하다면 이 시점에 몇 프레임 실행
+                    for _ in range(20): await rep.orchestrator.step_async()
 
-                    # 5. 여러 뷰를 캡처하는 루프는 그대로 유지합니다.
-                    print(f"Capture by Camera")
+                    prim_paths = []
+                    if hasattr(obj, "get_output_prims"):
+                        print(f"get_output")
+                        prim_paths = obj.get_output_prims()          
+                    elif hasattr(obj, "get_prims"):              
+                        print(f"get")
+                        prim_paths = obj.get_prims()
+                    else:
+                        print(f"get_node")
+                        prim_paths = rep.utils.get_node_targets(
+                            obj.node, "inputs:prims"
+                        )
+
+                    print(f"Prim Paths : {prim_paths}")
+                    obj_prim = obj.get_output_prims()["prims"][0]
+                    pose    = physx.get_physx_interface().get_rigid_body_pose(obj_prim)
+                    print("world pos:", pose.p)
+                    # prim_path = obj_prim.GetPath()            
+                    # print(f"Object Prim Path: {prim_path}")
+                    # stage = omni.usd.get_context().get_stage()
+                    # obj_prim = stage.GetPrimAtPath(prim_path)
+
+                    # iface = physx.get_physx_interface()
+                    # rb_prim = next(
+                    #     p for p in obj_prim.GetDescendants()
+                    #     if iface.is_rigid_body(p)               # 물리 API 달린 Prim
+                    # )
+
+                    # # 객체의 월드 변환 행렬(World Transform Matrix)을 가져옵니다.
+                    # world_transform = omni.usd.get_world_transform_matrix(rb_prim)
+                    
+                    # # 변환 행렬에서 위치(Translation) 벡터만 추출합니다.
+                    # obj_pos_world   = world_transform.ExtractTranslation()
+                    
+                    # print(f"Object Position (after): {obj_pos_world}")
+
+
+
+                    # 4. ★★★ for 루프를 사용한 안정적인 뷰 캡처 ★★★
                     pts, cols, lbls = [], [], []
-                    
-                    # with rep.trigger.on_frame(max_execs=VIEWS_PER_SAMPLE):
-                    #     rep.randomizer.capture_view()
-                    print(f"[INFO] apply cam domain randomization")
                     for v_idx in range(VIEWS_PER_SAMPLE):
+                        distance = random.uniform(10, 15)
+                        # 수평각(theta)과 수직각(phi)을 랜덤하게 선택 (라디안으로 변환)
+                        theta = math.radians(random.uniform(0, 360)) # 0~360도
+                        phi = math.radians(random.uniform(30, 80))
+                        relative_x = distance * math.sin(phi) * math.cos(theta)
+                        relative_y = distance * math.sin(phi) * math.sin(theta)
+                        relative_z = distance * math.cos(phi)
                         with cam:
-                            rep.modify.pose(
-                                position=rep.distribution.uniform((-3, -3, 4), (3, 3, 8)),
-                                look_at=obj
+                            cam_pos = (
+                                obj_pos[0] + relative_x,
+                                obj_pos[1] + relative_y,
+                                obj_pos[2] + relative_z
                             )
-
+                            rep.modify.pose(position=cam_pos, look_at=obj)
+                        
                         await rep.orchestrator.step_async()
-                        print(f"[INFO] capture image")
-
+                        
                         pc = anno.get_data()
-                        if pc["data"].size == 0:
-                            continue
-
-                        pts .append(pc["data"])
-                        cols.append(pc["info"]["pointRgb"][:, :3] / 255.0)
-                        lbls.append(pc["info"]["pointSemantic"])
-                        print("[INFO] save pointcloud")
+                        if pc["data"].size > 0:
+                            pts.append(pc["data"])
+                            cols.append(pc["info"]["pointRgb"][:, :3] / 255.0)
+                            lbls.append(pc["info"]["pointSemantic"])
 
                 # ---------- 뷰 → 하나로 저장 -------------------------
                 print(f"[INFO] Save Point Cloud Data")
@@ -189,6 +215,8 @@ async def generate():
                     stub = f"{usd_stem}_s{s_idx:03d}"
                     save_cloud(final_pts, final_cols, final_lbls,
                             os.path.join(SAVE_ROOT, cat), stub)
+                    
+                await asyncio.sleep(0.1)
 
 # -------------------------------------------------------------- #
 # 4. 실행

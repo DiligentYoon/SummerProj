@@ -55,7 +55,7 @@ def design_scene():
     prim_utils.create_prim("/World/Objects", "Xform")
 
     # --- 스폰할 객체 목록 정의 ---
-    BASE_PATH = "C:/Users/AISL/SummerProj/Dataset/google_objects_usd"
+    BASE_PATH = os.path.join(os.getcwd(), "Dataset", "google_objects_usd")
 
     ASSET_LIST = {
         "Mug": [

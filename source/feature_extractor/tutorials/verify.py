@@ -23,7 +23,7 @@ ASSET_LIST = {
 
 def verify_and_visualize_dataset(save_gif=True, gif_name="rotation.gif"):
     # ---------- 1. 데이터 로드 ----------
-    cls_idx, obj_idx = 1, 1
+    cls_idx, obj_idx = 0, 1
     cls_key = list(ASSET_LIST)[cls_idx]
     obj_key = ASSET_LIST[cls_key][obj_idx]
 
@@ -51,7 +51,7 @@ def verify_and_visualize_dataset(save_gif=True, gif_name="rotation.gif"):
     vc.set_lookat(center.tolist())
     vc.set_front([0.2, 0.2, 0.2])
     vc.set_up([0, 0, 0.5])
-    vc.set_zoom(0.2)
+    vc.set_zoom(0.1)
 
     # ---------- 4. 애니메이션 ----------
     R_step = pcd.get_rotation_matrix_from_axis_angle([0, 0, np.deg2rad(3)])
