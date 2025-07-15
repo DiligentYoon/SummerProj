@@ -3,8 +3,8 @@ import numpy as np
 import imageio.v2 as imageio   # ← GIF 저장용
 import os, time
 
-CUBE_ID   = 3
-GROUND_ID = 2
+CUBE_ID   = 2
+GROUND_ID = 1
 
 ASSET_LIST = {
     "Mug": [
@@ -23,13 +23,13 @@ ASSET_LIST = {
 
 def verify_and_visualize_dataset(save_gif=True, gif_name="rotation.gif"):
     # ---------- 1. 데이터 로드 ----------
-    cls_idx, obj_idx = 0, 0 
+    cls_idx, obj_idx = 1, 1
     cls_key = list(ASSET_LIST)[cls_idx]
     obj_key = ASSET_LIST[cls_key][obj_idx]
 
     dataset_dir     = os.path.join(os.getcwd(), "Dataset", cls_key)
-    ply_filepath    = os.path.join(dataset_dir, f"{obj_key}_s020.ply")
-    labels_filepath = os.path.join(dataset_dir, f"{obj_key}_s020_labels.npy")
+    ply_filepath    = os.path.join(dataset_dir, f"{obj_key}_s000.ply")
+    labels_filepath = os.path.join(dataset_dir, f"{obj_key}_s000_labels.npy")
 
     pcd    = o3d.io.read_point_cloud(ply_filepath)
     labels = np.load(labels_filepath)
@@ -51,7 +51,7 @@ def verify_and_visualize_dataset(save_gif=True, gif_name="rotation.gif"):
     vc.set_lookat(center.tolist())
     vc.set_front([0.2, 0.2, 0.2])
     vc.set_up([0, 0, 0.5])
-    vc.set_zoom(0.05)
+    vc.set_zoom(0.2)
 
     # ---------- 4. 애니메이션 ----------
     R_step = pcd.get_rotation_matrix_from_axis_angle([0, 0, np.deg2rad(3)])
