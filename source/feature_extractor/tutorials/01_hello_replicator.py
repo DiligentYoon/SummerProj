@@ -30,4 +30,4 @@ with rep.new_layer():
     writer.attach([render_product])
 
     # 프리뷰 실행
-    rep.orchestrator.preview()
+    rep.orchestrator.run()

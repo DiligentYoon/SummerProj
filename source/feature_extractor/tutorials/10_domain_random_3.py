@@ -128,26 +128,18 @@ async def generate():
 
                     print(f"Prim Paths : {prim_paths}")
                     obj_prim = obj.get_output_prims()["prims"][0]
-                    pose    = physx.get_physx_interface().get_rigid_body_pose(obj_prim)
-                    print("world pos:", pose.p)
-                    # prim_path = obj_prim.GetPath()            
-                    # print(f"Object Prim Path: {prim_path}")
-                    # stage = omni.usd.get_context().get_stage()
+                    prim_path = obj_prim.GetPath()            
+                    print(f"Object Prim Path: {prim_path}")
+                    stage = omni.usd.get_context().get_stage()
                     # obj_prim = stage.GetPrimAtPath(prim_path)
 
-                    # iface = physx.get_physx_interface()
-                    # rb_prim = next(
-                    #     p for p in obj_prim.GetDescendants()
-                    #     if iface.is_rigid_body(p)               # 물리 API 달린 Prim
-                    # )
-
                     # # 객체의 월드 변환 행렬(World Transform Matrix)을 가져옵니다.
-                    # world_transform = omni.usd.get_world_transform_matrix(rb_prim)
+                    world_transform = omni.usd.get_world_transform_matrix(obj_prim)
                     
                     # # 변환 행렬에서 위치(Translation) 벡터만 추출합니다.
-                    # obj_pos_world   = world_transform.ExtractTranslation()
+                    obj_pos_world   = world_transform.ExtractTranslation()
                     
-                    # print(f"Object Position (after): {obj_pos_world}")
+                    print(f"Object Position (after): {obj_pos_world}")
 
 
 
