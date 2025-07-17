@@ -4,7 +4,6 @@ with rep.new_layer():
 
     camera = rep.create.camera(position=(0, 0, 1000))
 
-    # Additional Light for headless option
     sphere_light = rep.create.light(
         light_type="Sphere",
         temperature=rep.distribution.normal(6500, 500),

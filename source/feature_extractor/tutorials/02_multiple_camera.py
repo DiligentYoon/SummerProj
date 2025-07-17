@@ -21,7 +21,7 @@ with rep.new_layer():
     # 카메라의 3프레임 마다 두 카메라의 위치 랜덤 변경 in list 후보군
     with rep.trigger.on_frame(num_frames=3):
         with camera:
-            rep.modify.pose(look_at=(0,0,0), position=rep.distribution.sequence(camera1_pos))
+            rep.modify.pose(look_at=(0,0,100 ), position=rep.distribution.sequence(camera1_pos))
         with camera2:
             rep.modify.pose(look_at=(0,0,0), position=rep.distribution.sequence(camera2_pos))
 
