@@ -4,10 +4,10 @@ import json
 import math
 import os
 import random
+import numpy as np
 
 import yaml
 from isaacsim import SimulationApp
-
 
 config = {
     "launch_config": {
@@ -15,20 +15,63 @@ config = {
         "headless": False,
     },
     "resolution": [512, 512],
-    "rt_subframes": 16,
-    "num_frames": 20,
-    "env_url": "/Isaac/Environments/Simple_Warehouse/full_warehouse.usd",
+    "rt_subframes": 24,
+    "num_frames": 10,
+    "env_url": "/Isaac/Environments/Terrains/flat_plane.usd",
     "writer": "BasicWriter",
     "writer_config": {
-        "output_dir": "_out_scene_based_sdg",
+        "output_dir": "Dataset",
         "rgb": True,
-        "bounding_box_2d_tight": True,
         "semantic_segmentation": True,
-        "distance_to_image_plane": True,
-        "bounding_box_3d": True,
-        "occlusion": True,
+        "pointcloud": True,                         
     },
     "clear_previous_semantics": True,
+
+    "mug_1": {
+        "url": "/Isaac/Props/YCB/Axis_Aligned/025_mug.usd",
+        "class": "mug"
+    },
+
+    "mug_2": {
+        "url": "/Isaac/Props/Mugs/SM_Mug_B1.usd",
+        "class": "mug"
+    },
+
+    "mug_3": {
+        "url": "/Isaac/Props/Mugs/SM_Mug_C1.usd",
+        "class": "mug"
+    },
+
+    "mug_4": {
+        "url": "/Isaac/Props/Mugs/SM_Mug_D1.usd",
+        "class": "mug"
+    },
+
+    "cube_1": {
+        "url": "/Isaac/Props/YCB/Axis_Aligned/010_potted_meat_can.usd",
+        "class": "cube"
+    },
+
+    "cube_2": {
+        "url": "/Isaac/Props/YCB/Axis_Aligned/003_cracker_box.usd",
+        "class": "cube"
+    },
+
+    "cylinder_1": {
+        "url": "/Isaac/Props/YCB/Axis_Aligned/002_master_chef_can.usd",
+        "class": "cylinder"
+    },
+
+    "cyliner_2": {
+        "url": "/Isaac/Props/YCB/Axis_Aligned/005_tomato_soop_can.usd",
+        "class": "cylinder"
+    },
+
+    "table": {
+        "url": "/Isaac/Props/Mounts/ThorlabsTable/table_instanceable.usd",
+        "class": "Table"
+    },
+
     "forklift": {
         "url": "/Isaac/Props/Forklift/forklift.usd",
         "class": "Forklift",
@@ -85,12 +128,12 @@ import carb
 from isaacsim.core.utils import prims
 from isaacsim.core.utils.rotations import euler_angles_to_quat
 from isaacsim.core.utils.stage import get_current_stage, open_stage
-from isaacsim.storage.native import get_assets_root_path
 from isaacsim.core.utils.bounds import compute_combined_aabb, compute_obb, create_bbox_cache, get_obb_corners
-from pxr import Gf
+from isaacsim.storage.native import get_assets_root_path
+from isaacsim.core.utils.semantics import remove_all_semantics
+from pxr import Gf, UsdGeom
 
-import utils
-
+import my_utils
 
 # ============================= 초기 세팅 ===================================
 
@@ -112,76 +155,51 @@ rep.orchestrator.set_capture_on_play(False)
 # Clear any previous semantic data in the loaded stage
 if config["clear_previous_semantics"]:
     stage = get_current_stage()
-    utils.remove_previous_semantics(stage)
+    my_utils.remove_previous_semantics(stage)
 
 
 
-
-# =========================== Prim 스폰 =====================================
-
-# Spawn a new forklift at a random pose
-forklift_prim = prims.create_prim(
-    prim_path="/World/Forklift",
-    position=(random.uniform(-20, -2), random.uniform(-1, 3), 0),
-    orientation=euler_angles_to_quat([0, 0, random.uniform(0, math.pi)]),
-    usd_path=assets_root_path + config["forklift"]["url"],
-    semantic_label=config["forklift"]["class"],
-)
-
-# Spawn the pallet in front of the forklift with a random offset on the Y (pallet's forward) axis
-forklift_tf = omni.usd.get_world_transform_matrix(forklift_prim)
-pallet_offset_tf = Gf.Matrix4d().SetTranslate(Gf.Vec3d(0, random.uniform(-1.2, -1.8), 0))
-pallet_pos_gf = (pallet_offset_tf * forklift_tf).ExtractTranslation()
-forklift_quat_gf = forklift_tf.ExtractRotationQuat()
-forklift_quat_xyzw = (forklift_quat_gf.GetReal(), *forklift_quat_gf.GetImaginary())
+# =========================== object Prim 스폰 ===============================
 
 pallet_prim = prims.create_prim(
     prim_path="/World/Pallet",
-    position=pallet_pos_gf,
-    orientation=forklift_quat_xyzw,
+    position=(random.uniform(-20, -2), random.uniform(-1, 3), 0),
+    orientation=euler_angles_to_quat([0, 0, random.uniform(0, math.pi)]),
     usd_path=assets_root_path + config["pallet"]["url"],
-    semantic_label=config["pallet"]["class"],
-)
+    semantic_label=config["pallet"]["class"])
 
-# Spawn a camera in the driver's location looking at the pallet
-foklift_pos_gf = forklift_tf.ExtractTranslation()
-driver_cam_pos_gf = foklift_pos_gf + Gf.Vec3d(0.0, 0.0, 1.9)
-
-driver_cam = rep.create.camera(
-    focus_distance=400.0, focal_length=24.0, clipping_range=(0.1, 10000000.0), name="DriverCam"
-)
-
-# Camera looking at the pallet
-pallet_cam = rep.create.camera(name="PalletCam")
-
-# Camera looking at the forklift from a top view with large min clipping to see the scene through the ceiling
-top_view_cam = rep.create.camera(clipping_range=(6.0, 1000000.0), name="TopCam")
+table_tf = omni.usd.get_world_transform_matrix(pallet_prim)
+table_loc_gf = table_tf.ExtractTranslation()
+table_quat_gf = table_tf.ExtractRotationQuat()
 
 
+# ========================= 카메라 Prim 스폰 =============================
+
+cam_1 = rep.create.camera(name="Cam1")
+cam_2 = rep.create.camera(name="Cam2")
+cam_3 = rep.create.camera(name="Cam3")
+cam_4 = rep.create.camera(name="Cam4")
 
 
 # ========================= Randomization graphs 등록 ===========================
 
-utils.register_scatter_boxes(pallet_prim, assets_root_path, config)
-utils.register_cone_placement(forklift_prim, assets_root_path, config)
-utils.register_lights_placement(forklift_prim, pallet_prim)
-
-
+# Object Randomization (Pose)
+my_utils.register_scatter_objs(pallet_prim, assets_root_path, config, "cube_1")
+# Light Parameter
+my_utils.register_lights_placement(pallet_prim)
 
 
 # ==================== 데이터셋 생성을 위한 Render Product 생성 ===================
 
 # Create render products for the custom cameras and attach them to the writer
-resolution = config.get("resolution", (512, 512))
-forklift_rp = rep.create.render_product(top_view_cam, resolution, name="TopView")
-driver_rp = rep.create.render_product(driver_cam, resolution, name="DriverView")
-pallet_rp = rep.create.render_product(pallet_cam, resolution, name="PalletView")
-# Disable the render products until SDG to improve perf by avoiding unnecessary rendering
-rps = [forklift_rp, driver_rp, pallet_rp]
+resolution = config.get("resolution", (1024, 1024))
+rp_1 = rep.create.render_product(cam_1, resolution, name="Cam1")
+rp_2 = rep.create.render_product(cam_2, resolution, name="Cam2")
+rp_3 = rep.create.render_product(cam_3, resolution, name="Cam3")
+rp_4 = rep.create.render_product(cam_4, resolution, name="Cam4")
+rps = [rp_1, rp_2, rp_3, rp_4]
 for rp in rps:
     rp.hydra_texture.set_updates_enabled(False)
-
-
 
 
 # ================== 데이터셋 파일변환을 위한 Writer Product 생성 ==================
@@ -208,51 +226,65 @@ writer.attach(rps)
 
 
 
+
 # ================ Randomizer의 Frame-wise Control Logic 생성 ==================
 
 # Setup the randomizations to be triggered every frame
 with rep.trigger.on_frame():
-    rep.randomizer.scatter_boxes()
+    rep.randomizer.scatter_obj()
     rep.randomizer.randomize_lights()
 
-    # Randomize the camera position in the given area above the pallet and look at the pallet prim
-    pallet_cam_min = (pallet_pos_gf[0] - 2, pallet_pos_gf[1] - 2, 2)
-    pallet_cam_max = (pallet_pos_gf[0] + 2, pallet_pos_gf[1] + 2, 4)
-    with pallet_cam:
+    rho_min = 1.5
+    rho_max = 2.0
+    roll = 0
+    pitch = 45
+    yaw = [0, 90.0, 180.0, 270.0]
+
+    directions = []
+    for yaw_deg in yaw:
+        yaw_rad = math.radians(yaw_deg)
+        pitch_rad = math.radians(pitch)
+         
+        x = math.sin(pitch_rad) * math.cos(yaw_rad)
+        y = math.sin(pitch_rad) * math.sin(yaw_rad)
+        z = math.cos(pitch_rad)
+        
+        directions.append((x, y, z))
+
+    directions_arr = np.array(directions)
+    table_loc_arr = np.array([table_loc_gf[0], table_loc_gf[1], table_loc_gf[2]])
+
+    endpoint1 = directions_arr * rho_min + table_loc_arr
+    endpoint2 = directions_arr * rho_max + table_loc_arr
+
+    final_min_pos = np.minimum(endpoint1, endpoint2)
+    final_max_pos = np.maximum(endpoint1, endpoint2)
+    with cam_1:
         rep.modify.pose(
-            position=rep.distribution.uniform(pallet_cam_min, pallet_cam_max),
+            position=rep.distribution.uniform(final_min_pos[0, :], final_max_pos[0, :]),
             look_at=str(pallet_prim.GetPrimPath()),
-        )
+        )    
 
-    # Randomize the camera position in the given height above the forklift driver's seat and look at the pallet prim
-    driver_cam_min = (driver_cam_pos_gf[0], driver_cam_pos_gf[1], driver_cam_pos_gf[2] - 0.25)
-    driver_cam_max = (driver_cam_pos_gf[0], driver_cam_pos_gf[1], driver_cam_pos_gf[2] + 0.25)
-    with driver_cam:
+    with cam_2:
         rep.modify.pose(
-            position=rep.distribution.uniform(driver_cam_min, driver_cam_max),
+            position=rep.distribution.uniform(final_min_pos[1, :], final_max_pos[1, :]),
             look_at=str(pallet_prim.GetPrimPath()),
-        )
-
-# Setup the randomizations to be triggered at every nth frame (interval)
-with rep.trigger.on_frame(interval=4):
-    top_view_cam_min = (foklift_pos_gf[0], foklift_pos_gf[1], 9)
-    top_view_cam_max = (foklift_pos_gf[0], foklift_pos_gf[1], 11)
-    with top_view_cam:
+        )    
+    
+    with cam_3:
         rep.modify.pose(
-            position=rep.distribution.uniform(top_view_cam_min, top_view_cam_max),
-            rotation=rep.distribution.uniform((0, -90, -30), (0, -90, 30)),
-        )
+            position=rep.distribution.uniform(final_min_pos[2, :], final_max_pos[2, :]),
+            look_at=str(pallet_prim.GetPrimPath()),
+        )    
 
-# Setup the randomizations to be manually triggered at specific times
-with rep.trigger.on_custom_event("randomize_cones"):
-    rep.randomizer.place_cones()
-
+    with cam_4:
+        rep.modify.pose(
+            position=rep.distribution.uniform(final_min_pos[3, :], final_max_pos[3, :]),
+            look_at=str(pallet_prim.GetPrimPath()),
+        ) 
 
 
 # ========================= Simulation 시작 ==============================
-
-# Run a simulation by dropping randomly placed boxes on a pallet next to the forklift
-utils.simulate_falling_objects(forklift_prim, assets_root_path, config)
 
 # Increase subframes if materials are not loaded on time, or ghosting artifacts appear on moving objects,
 # see: https://docs.omniverse.nvidia.com/extensions/latest/ext_replicator/subframes_examples.html
@@ -267,12 +299,8 @@ num_frames = config.get("num_frames", 0)
 print(f"[scene_based_sdg] Running SDG for {num_frames} frames")
 for i in range(num_frames):
     print(f"[scene_based_sdg] \t Capturing frame {i}")
-    # Trigger the custom event to randomize the cones at specific frames
-    if i % 2 == 0:
-        rep.utils.send_og_event(event_name="randomize_cones")
     # Trigger any on_frame registered randomizers and the writers (delta_time=0.0 to avoid advancing the timeline)
     rep.orchestrator.step(delta_time=0.0, rt_subframes=rt_subframes)
-
 # Wait for the data to be written to disk
 rep.orchestrator.wait_until_complete()
 
