@@ -126,9 +126,9 @@ import carb
 
 # Custom util functions for the example
 from isaacsim.core.utils import prims
+from isaacsim.core.api import World
 from isaacsim.core.utils.rotations import euler_angles_to_quat
 from isaacsim.core.utils.stage import get_current_stage, open_stage
-from isaacsim.core.utils.bounds import compute_combined_aabb, compute_obb, create_bbox_cache, get_obb_corners
 from isaacsim.storage.native import get_assets_root_path
 from isaacsim.core.utils.semantics import remove_all_semantics
 from pxr import Gf, UsdGeom
@@ -231,7 +231,7 @@ writer.attach(rps)
 
 # Setup the randomizations to be triggered every frame
 with rep.trigger.on_frame():
-    rep.randomizer.scatter_obj()
+    # rep.randomizer.scatter_obj()
     rep.randomizer.randomize_lights()
 
     rho_min = 1.5
@@ -285,7 +285,7 @@ with rep.trigger.on_frame():
 
 
 # ========================= Simulation 시작 ==============================
-
+world = World(physics_dt=1.0 / 90.0, stage_units_in_meters=1.0)
 # Increase subframes if materials are not loaded on time, or ghosting artifacts appear on moving objects,
 # see: https://docs.omniverse.nvidia.com/extensions/latest/ext_replicator/subframes_examples.html
 rt_subframes = config.get("rt_subframes", -1)
@@ -300,6 +300,7 @@ print(f"[scene_based_sdg] Running SDG for {num_frames} frames")
 for i in range(num_frames):
     print(f"[scene_based_sdg] \t Capturing frame {i}")
     # Trigger any on_frame registered randomizers and the writers (delta_time=0.0 to avoid advancing the timeline)
+    my_utils.place_and_settle_objects(world, pallet_prim, assets_root_path, config, "mug_2", count=1)
     rep.orchestrator.step(delta_time=0.0, rt_subframes=rt_subframes)
 # Wait for the data to be written to disk
 rep.orchestrator.wait_until_complete()

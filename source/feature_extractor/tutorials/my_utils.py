@@ -211,6 +211,68 @@ def register_scatter_objs(table_prim, assets_root_path, config, object_class: st
     rep.randomizer.register(scatter_obj)
 
 
+def place_and_settle_objects(world, pallet_prim, assets_root_path, config, object_class: str, count: int = 1):
+    """
+        오브젝트를 팔레트 위 허공에 랜덤하게 배치한 후,
+        물리 시뮬레이션을 통해 안정적으로 안착시킵니다.
+    """
+    
+    # 팔레트에도 물리 속성을 한 번만 부여합니다.
+    add_colliders(pallet_prim, approx_type="boundingCube")
+    pallet_rigid_prim = SingleRigidPrim(str(pallet_prim.GetPrimPath()))
+    pallet_rigid_prim.enable_rigid_body_physics()
+
+    settled_objects = []
+    for i in range(count):
+        prim_path = f"/World/SettledObject_{i}"
+
+        bb_cache = create_bbox_cache()
+        pallet_tf = omni.usd.get_world_transform_matrix(pallet_prim)
+        pallet_loc = pallet_tf.ExtractTranslation()
+        world_bbox_range = bb_cache.ComputeWorldBound(pallet_prim).GetRange()
+        plane_min = world_bbox_range.GetMin()
+        plane_max = world_bbox_range.GetMax()
+        spawn_base_z = plane_max[2] # 팔레트 상판 높이
+
+        orientation = euler_angles_to_quat(np.random.uniform((0,0,0), (0,0,360)))
+
+        if prims.is_prim_path_valid(prim_path):
+            # 오브젝트가 이미 존재하면, 위치와 방향만 재설정합니다.
+            rigid_prim = SingleRigidPrim(prim_path)
+            rigid_prim.set_world_pose(position=pallet_loc + Gf.Vec3d(random.uniform(plane_min[0], plane_max[0]) * 0.6, 
+                                                                     random.uniform(plane_min[1], plane_max[1]) * 0.6, 
+                                                                     spawn_base_z + (i + 1) * 0.02),
+                                      orientation=orientation)
+        else:
+            # 오브젝트가 없으면 새로 생성하고 물리 속성을 부여합니다.
+            obj_prim = prims.create_prim(
+                prim_path=prim_path,
+                position=pallet_loc + Gf.Vec3d(random.uniform(plane_min[0], plane_max[0]) * 0.6, 
+                                               random.uniform(plane_min[1], plane_max[1]) * 0.6, 
+                                               spawn_base_z + (i + 1) * 0.02),
+                orientation=orientation,
+                usd_path=assets_root_path + config[object_class]["url"],
+                semantic_label=config[object_class]["class"]
+            )
+            add_colliders(obj_prim, approx_type="convexDecomposition")
+            rigid_prim = SingleRigidPrim(prim_path)
+            rigid_prim.enable_rigid_body_physics()  
+                 
+        settled_objects.append(rigid_prim)
+        print(f"Object Offset : {omni.usd.get_world_transform_matrix(rigid_prim.prim).ExtractTranslation() - pallet_loc}")
+
+    # 5. 물리 시뮬레이션 실행 (안착 단계)
+    world.play()
+    # 약 1초간 시뮬레이션을 실행하여 오브젝트를 안정화시킵니다.
+    for _ in range(60):
+        world.step(render=False)
+    
+    world.pause()
+        
+    print("물리 시뮬레이션을 통해 오브젝트 안착 완료.")
+    print(f"최종 Object 위치 : {omni.usd.get_world_transform_matrix(rigid_prim.prim).ExtractTranslation()}")
+
+
 
 
 # Register the place cones randomizer graph
