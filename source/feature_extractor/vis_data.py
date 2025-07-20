@@ -3,6 +3,9 @@ import numpy as np
 import imageio.v2 as imageio
 import os
 import time
+import json
+from PIL import Image
+
 
 # ========== 헬퍼 함수 및 ID 정의 ==========
 def rgba_to_int_id_bgra(r, g, b, a):
@@ -29,7 +32,6 @@ COLOR_MAP = {
         CUBE_ID:       [1.0, 0.0, 0.0],  # 큐브   -> 빨간색
         PALLET_ID:     [0.5, 0.5, 0.5],  # 팔레트 -> 회색
         UNLABELLED_ID: [0.0, 0.0, 0.0],  # 라벨없음 -> 녹색 (디버깅용)
-        BACKGROUND_ID: [0.0, 0.0, 0.0],  # 배경
     }
 
 print("\n")
@@ -40,6 +42,7 @@ print(F"Unlabelled ID : {UNLABELLED_ID}")
 print("-" * 20)
 
 # ==========================================
+
 
 
 def verify_and_visualize_dataset(save_gif=True, gif_name="merged_dataset.gif"):
@@ -57,6 +60,7 @@ def verify_and_visualize_dataset(save_gif=True, gif_name="merged_dataset.gif"):
     all_labels = []
 
     print("데이터 로딩 및 병합 시작...")
+    total_points = 0
     for cam_dir in cam_dirs:
         cam_path = os.path.join(base_dir, cam_dir)
         try:
@@ -72,6 +76,7 @@ def verify_and_visualize_dataset(save_gif=True, gif_name="merged_dataset.gif"):
                 all_points.append(xyz_data)
                 all_labels.append(labels_part)
                 print(f"[✓] {cam_dir} 로드 완료 ({len(xyz_data)} points)")
+                total_points += len(xyz_data)
             else:
                  print(f"[!] {cam_dir} 에 포인트가 없습니다.")
 
@@ -99,16 +104,19 @@ def verify_and_visualize_dataset(save_gif=True, gif_name="merged_dataset.gif"):
     colors = np.ones_like(merged_points) * 0.8
     # indices_1 = np.where(merged_labels == UNLABELLED_ID)[0]
     # indices_2 = np.where(~(merged_labels == UNLABELLED_ID))[0]
+    find_points = 0
     for label_id, color in COLOR_MAP.items():
         indices = np.where(merged_labels == label_id)[0]
         if indices.size > 0:
             print(f"ID {label_id} 에 해당하는 포인트를 {indices.size}개 찾았습니다.")
             print(f"ID {label_id} =====> RGBA {int_id_to_rgba_bgra(label_id)}")
             colors[indices] = color
+            find_points += indices.size
         else:
             print(f"ID {label_id} 에 해당하는 포인트를 찾지 못했습니다.")
             print(f"ID {label_id} =====> RGBA {int_id_to_rgba_bgra(label_id)}")
 
+    print(f"찾은 포인트 개수 및 비율 : {find_points} / {total_points}")
     pcd.colors = o3d.utility.Vector3dVector(colors)
 
     # ... (이후 뷰어 설정, 애니메이션, GIF 저장 코드는 이전과 동일) ...
@@ -118,7 +126,7 @@ def verify_and_visualize_dataset(save_gif=True, gif_name="merged_dataset.gif"):
     vis.add_geometry(pcd)
     
     opt = vis.get_render_option()
-    opt.background_color = np.asarray([0.1, 0.1, 0.1])
+    opt.background_color = np.asarray([0.0, 0.0, 0.0])
     opt.point_size = 2.0
     
     vis.poll_events(); vis.update_renderer()
