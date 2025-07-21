@@ -47,12 +47,19 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
-from isaaclab.utils.math import axis_angle_from_quat, quat_from_euler_xyz
+from isaaclab.utils.math import quat_from_euler_xyz, quat_from_angle_axis, quat_mul
 
+FRONT_ROT = (0.61237, 0.35355, 0.35355, 0.61237)
+LEFT_ROT = (0.81013, 0.53848, -0.13613, -0.18761)
+RIGHT_ROT = (0.18761, 0.13613, -0.53848, -0.81013)
 
-FRONT_ROT = tuple(quat_from_euler_xyz(roll=torch.tensor(0.0), pitch=torch.tensor(60.0), yaw=torch.tensor(90.0)).numpy())
-LEFT_ROT = tuple(quat_from_euler_xyz(roll=torch.tensor(65.0), pitch=torch.tensor(-25.0), yaw=torch.tensor(-10.0)).numpy())
-RIGHT_ROT = tuple(quat_from_euler_xyz(roll=torch.tensor(-65.0), pitch=torch.tensor(-25.0), yaw=torch.tensor(-170.0)).numpy())
+# Experimental known (Configuration -> Simulation Transformation)
+QUAT_CON_TO_SIM = (0.5, 0.5, -0.5, -0.5)
+QUAT_SIM_TO_CON = (0.5, -0.5, 0.5, 0.5)
+
+FRONT_ROT_CON = tuple(quat_mul(torch.tensor(FRONT_ROT), torch.tensor(QUAT_SIM_TO_CON)).numpy())
+LEFT_ROT_CON = tuple(quat_mul(torch.tensor(LEFT_ROT), torch.tensor(QUAT_SIM_TO_CON)).numpy())
+RIGHT_ROT_CON = tuple(quat_mul(torch.tensor(RIGHT_ROT), torch.tensor(QUAT_SIM_TO_CON)).numpy())
 
 @configclass
 class SensorsSceneCfg(InteractiveSceneCfg):
@@ -76,9 +83,10 @@ class SensorsSceneCfg(InteractiveSceneCfg):
                                    scale=(1.0, 1.0, 1.0)),
     )
 
+
     # sensor
     front_camera = CameraCfg(
-        prim_path="/World/envs/env/Table/Frontcam",
+        prim_path=f"/World/envs/env/FrontCam",
         update_period=0.1,
         height=1024,
         width=1024,
@@ -91,12 +99,12 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
             clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
         ),
-        offset=CameraCfg.OffsetCfg(pos=(1.6, 0.0, 0.7), rot=FRONT_ROT, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(1.6, 0.0, 0.7), rot=FRONT_ROT_CON, convention="world"),
     )
 
     # sensor
     left_behind_camera = CameraCfg(
-        prim_path="/World/envs/env/Table/Leftcam",
+        prim_path="/World/envs/env/Leftcam",
         update_period=0.1,
         height=1024,
         width=1024,
@@ -109,12 +117,12 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
             clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
         ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.13, -1.2, 0.5), rot=LEFT_ROT, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(-0.13, -1.2, 0.5), rot=LEFT_ROT_CON, convention="world"),
     )
 
     # sensor
     right_behind_camera = CameraCfg(
-        prim_path="/World/envs/env/Table/Rightcam",
+        prim_path="/World/envs/env/Rightcam",
         update_period=0.1,
         height=1024,
         width=1024,
@@ -127,7 +135,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
             clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
         ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.13, 1.2, 0.5), rot=RIGHT_ROT, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(-0.13, 1.2, 0.5), rot=RIGHT_ROT_CON, convention="world"),
     )
 
 
