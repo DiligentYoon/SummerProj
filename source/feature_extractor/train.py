@@ -4,7 +4,7 @@ Date: Nov 2019
 """
 import argparse
 import os
-from data_utils.S3DISDataLoader import S3DISDataset
+from dataset import NPZDataset
 import torch
 import datetime
 import logging
@@ -16,14 +16,15 @@ from tqdm import tqdm
 import provider
 import numpy as np
 import time
+import random
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = BASE_DIR
-sys.path.append(os.path.join(ROOT_DIR, 'models'))
+sys.path.append(os.path.join(ROOT_DIR, 'model'))
 
-classes = ['ceiling', 'floor', 'wall', 'beam', 'column', 'window', 'door', 'table', 'chair', 'sofa', 'bookcase',
-           'board', 'clutter']
-class2label = {cls: i for i, cls in enumerate(classes)}
+
+classes = ['background', 'object']
+class2label = {cls: i+1 for i, cls in enumerate(classes)}
 seg_classes = class2label
 seg_label_to_cat = {}
 for i, cat in enumerate(seg_classes.keys()):
@@ -36,7 +37,7 @@ def inplace_relu(m):
 
 def parse_args():
     parser = argparse.ArgumentParser('Model')
-    parser.add_argument('--model', type=str, default='pointnet_sem_seg', help='model name [default: pointnet_sem_seg]')
+    parser.add_argument('--model', type=str, default='pointnet2', help='model name [default: pointnet_sem_seg]')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch Size during training [default: 16]')
     parser.add_argument('--epoch', default=32, type=int, help='Epoch to run [default: 32]')
     parser.add_argument('--learning_rate', default=0.001, type=float, help='Initial learning rate [default: 0.001]')
@@ -44,12 +45,20 @@ def parse_args():
     parser.add_argument('--optimizer', type=str, default='Adam', help='Adam or SGD [default: Adam]')
     parser.add_argument('--log_dir', type=str, default=None, help='Log path [default: None]')
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='weight decay [default: 1e-4]')
-    parser.add_argument('--npoint', type=int, default=4096, help='Point Number [default: 4096]')
+    parser.add_argument('--npoint', type=int, default=2400, help='Point Number [default: 2400]')
     parser.add_argument('--step_size', type=int, default=10, help='Decay step for lr decay [default: every 10 epochs]')
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
     parser.add_argument('--test_area', type=int, default=5, help='Which area to use for test, option: 1-6 [default: 5]')
 
     return parser.parse_args()
+
+manual_seed = 42
+def worker_init_fn(worker_id):
+    seed = manual_seed + worker_id
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+
 
 
 def main(args):
@@ -88,19 +97,22 @@ def main(args):
     log_string('PARAMETER ...')
     log_string(args)
 
-    root = 'data/stanford_indoor3d/'
-    NUM_CLASSES = 13
+    NUM_CLASSES = len(classes)
     NUM_POINT = args.npoint
     BATCH_SIZE = args.batch_size
+    train_path = os.path.join(os.getcwd(), "Dataset", "TrainingData")
+    test_path = os.path.join(os.getcwd(), "Dataset", "TestingData")
+    split = ["mug_1", "mug_2", "cube_1", "cube_2", "cylinder_1", "cylinder_2"]
+
 
     print("start loading training data ...")
-    TRAIN_DATASET = S3DISDataset(split='train', data_root=root, num_point=NUM_POINT, test_area=args.test_area, block_size=1.0, sample_rate=1.0, transform=None)
+    TRAIN_DATASET = NPZDataset(split, train_path, num_point=NUM_POINT, transforms=provider.rotate_point_cloud_z)
     print("start loading test data ...")
-    TEST_DATASET = S3DISDataset(split='test', data_root=root, num_point=NUM_POINT, test_area=args.test_area, block_size=1.0, sample_rate=1.0, transform=None)
+    TEST_DATASET  = NPZDataset(split, test_path, num_point=NUM_POINT)
 
     trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True, num_workers=10,
                                                   pin_memory=True, drop_last=True,
-                                                  worker_init_fn=lambda x: np.random.seed(x + int(time.time())))
+                                                  worker_init_fn=worker_init_fn)
     testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=BATCH_SIZE, shuffle=False, num_workers=10,
                                                  pin_memory=True, drop_last=True)
     weights = torch.Tensor(TRAIN_DATASET.labelweights).cuda()
@@ -109,9 +121,9 @@ def main(args):
     log_string("The number of test data is: %d" % len(TEST_DATASET))
 
     '''MODEL LOADING'''
-    MODEL = importlib.import_module(args.model)
-    shutil.copy('models/%s.py' % args.model, str(experiment_dir))
-    shutil.copy('models/pointnet2_utils.py', str(experiment_dir))
+    MODEL = importlib.import_module('pointnet2')
+    shutil.copy(os.path.join(BASE_DIR, 'model/%s.py' % args.model), str(experiment_dir))
+    shutil.copy(os.path.join(BASE_DIR, 'model/pointnet2_utils.py'), str(experiment_dir))
 
     classifier = MODEL.get_model(NUM_CLASSES).cuda()
     criterion = MODEL.get_loss().cuda()
@@ -177,7 +189,7 @@ def main(args):
         loss_sum = 0
         classifier = classifier.train()
 
-        for i, (points, target) in tqdm(enumerate(trainDataLoader), total=len(trainDataLoader), smoothing=0.9):
+        for i, (points, feature, target) in tqdm(enumerate(trainDataLoader), total=len(trainDataLoader), smoothing=0.9):
             optimizer.zero_grad()
 
             points = points.data.numpy()

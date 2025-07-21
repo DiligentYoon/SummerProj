@@ -37,6 +37,7 @@ docker/.container.cfg
 
 # Dataset
 **/Dataset/*
+**/log/*
 
 # Outputs
 **/output/*

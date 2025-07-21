@@ -58,7 +58,7 @@ print("-" * 20)
 # ==========================================
 
 # =============== 시각화 함수 ===============
-def prepare_and_visualize_scene(base_dir: str, output_dir: str, frame_id: int, save_gif=True):
+def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, frame_id: int, save_gif=True):
     # ---------- 1. 데이터 로드 및 병합 ----------
     cam_dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and d.startswith("Cam")]
     cam_dirs.sort()
@@ -116,8 +116,12 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, frame_id: int, s
     x = seg_mask # HACMan++에서는 색상 제외
 
     # ---------- 3. 데이터 저장 ----------
-    os.makedirs(output_dir, exist_ok=True)
-    output_filepath = os.path.join(output_dir, f"sample_{frame_str}.npz")
+    if np.random.randn(1) <= 0.8:
+        os.makedirs(output_dir, exist_ok=True)
+        output_filepath = os.path.join(output_dir, f"sample_{frame_str}.npz")
+    else:
+        os.makedirs(test_dir, exist_ok=True)
+        output_filepath = os.path.join(test_dir, f"sample_{frame_str}.npz")
     np.savez(output_filepath, 
              pos=pos_normalized, 
              x=x, 
@@ -304,12 +308,14 @@ if __name__ == "__main__":
     for target_obj in OBJECT_LIST:
         dataset_root_dir = os.path.join(os.getcwd(), "Dataset", target_obj)
         training_data_dir = os.path.join(os.getcwd(), "Dataset", "TrainingData", target_obj)
+        testing_data_dir = os.path.join(os.getcwd(), "Dataset", "TestingData", target_obj)
         
         num_frames_generated = 200
         for i in range(num_frames_generated):
             prepare_and_visualize_scene(
                 base_dir=dataset_root_dir,
                 output_dir=training_data_dir,
+                test_dir=testing_data_dir,
                 frame_id=i,
                 save_gif=True # 각 프레임에 대한 시각화 GIF 저장
             )
