@@ -27,7 +27,7 @@ config = {
     },
     "clear_previous_semantics": True,
 
-    "target_obj": "cylinder_1",
+    "target_obj": "cylinder_2",
 
     "mug_1": {
         "url": "/Isaac/Props/YCB/Axis_Aligned/025_mug.usd",
@@ -65,7 +65,7 @@ config = {
     },
 
     "cylinder_2": {
-        "url": "/Isaac/Props/YCB/Axis_Aligned/005_tomato_soop_can.usd",
+        "url": "/Isaac/Props/YCB/Axis_Aligned/005_tomato_soup_can.usd",
         "class": "cylinder"
     },
 

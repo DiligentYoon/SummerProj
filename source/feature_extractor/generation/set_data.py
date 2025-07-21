@@ -63,7 +63,7 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
     cam_dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and d.startswith("Cam")]
     cam_dirs.sort()
     if not cam_dirs: return
-    all_points, all_labels, all_colors = [], [], []
+    all_points, all_labels, all_colors, all_normals = [], [], [], []
     frame_str = f"{frame_id:04d}"
     print(f"--- 프레임 {frame_str} 처리 시작 ---")
     for cam_dir in cam_dirs:
@@ -71,6 +71,7 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
             # ... 파일 로드 ...
             all_points.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_{frame_str}.npy")))
             all_labels.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_semantic_{frame_str}.npy")))
+            all_normals.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_normals_{frame_str}.npy")))
             # all_colors.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_rgb_{frame_str}.npy")))
         except FileNotFoundError:
             continue
@@ -79,13 +80,14 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
         return
     merged_points = np.vstack(all_points)
     merged_labels = np.concatenate(all_labels)
+    merged_normals = np.vstack(all_normals)
     # merged_colors = np.vstack(all_colors)
 
     # ---------- 2. 데이터 전처리 ----------
     object_mask = np.isin(merged_labels, OBJECT_IDS)
     background_mask = np.isin(merged_labels, PALLET_ID)
-    object_points, object_labels = merged_points[object_mask], merged_labels[object_mask]
-    background_points, background_labels = merged_points[background_mask], merged_labels[background_mask]
+    object_points, object_labels, object_normals = merged_points[object_mask], merged_labels[object_mask], merged_normals[object_mask]
+    background_points, background_labels, background_normals = merged_points[background_mask], merged_labels[background_mask], merged_normals[background_mask]
     # object_points, object_colors, object_labels = merged_points[object_mask], merged_colors[object_mask], merged_labels[object_mask]
     # background_points, background_colors, background_labels = merged_points[background_mask], merged_colors[background_mask], merged_labels[background_mask]
     
@@ -93,19 +95,20 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
     
     if len(object_points) > 0:
         obj_indices = np.random.choice(len(object_points), N_OBJ, replace=len(object_points) < N_OBJ)
-        obj_points_ds, obj_labels_ds = object_points[obj_indices], object_labels[obj_indices]
+        obj_points_ds, obj_labels_ds, obj_normals_ds = object_points[obj_indices], object_labels[obj_indices], object_normals[obj_indices]
     else:
-        obj_points_ds, obj_labels_ds = np.zeros((N_OBJ, 3)), np.zeros(N_OBJ)
+        obj_points_ds, obj_labels_ds, obj_normals_ds = np.zeros((N_OBJ, 3)), np.zeros(N_OBJ), np.zeros((N_OBJ, 4))
     
     if len(background_points) > 0:
         bg_indices = np.random.choice(len(background_points), N_BG, replace=len(background_points) < N_BG)
-        bg_points_ds, bg_labels_ds = background_points[bg_indices], background_labels[bg_indices]
+        bg_points_ds, bg_labels_ds, bg_normals_ds = background_points[bg_indices], background_labels[bg_indices], background_normals[bg_indices]
     else:
-        bg_points_ds, bg_labels_ds = np.zeros((N_BG, 3)), np.zeros(N_BG)
+        bg_points_ds, bg_labels_ds, bg_normals_ds = np.zeros((N_BG, 3)), np.zeros(N_BG), np.zeros((N_BG, 4))
 
     pos = np.vstack((obj_points_ds, bg_points_ds)).astype(np.float32)
     pos_normalized = pos - np.mean(pos, axis=0)
     y = np.concatenate((obj_labels_ds, bg_labels_ds)).astype(np.int64)
+    normals = np.vstack((obj_normals_ds, bg_normals_ds)).astype(np.float32)
     # 0으로 채워진 새로운 라벨 배열을 생성합니다 (기본값: 배경).
     y_indexed = np.zeros_like(y, dtype=np.int64)
 
@@ -113,7 +116,7 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
         y_indexed[y == id_32bit] = index
 
     seg_mask = np.vstack((np.ones((N_OBJ, 1)), np.zeros((N_BG, 1)))).astype(np.float32)
-    x = seg_mask # HACMan++에서는 색상 제외
+    x = np.hstack((normals, seg_mask)) # HACMan++에서는 색상 제외
 
     # ---------- 3. 데이터 저장 ----------
     if np.random.randn(1) <= 0.8:

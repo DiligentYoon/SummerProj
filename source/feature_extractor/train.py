@@ -24,7 +24,7 @@ sys.path.append(os.path.join(ROOT_DIR, 'model'))
 
 
 classes = ['background', 'object']
-class2label = {cls: i+1 for i, cls in enumerate(classes)}
+class2label = {cls: i for i, cls in enumerate(classes)}
 seg_classes = class2label
 seg_label_to_cat = {}
 for i, cat in enumerate(seg_classes.keys()):
@@ -189,7 +189,7 @@ def main(args):
         loss_sum = 0
         classifier = classifier.train()
 
-        for i, (points, feature, target) in tqdm(enumerate(trainDataLoader), total=len(trainDataLoader), smoothing=0.9):
+        for i, (points, target) in tqdm(enumerate(trainDataLoader), total=len(trainDataLoader), smoothing=0.9):
             optimizer.zero_grad()
 
             points = points.data.numpy()
@@ -215,7 +215,7 @@ def main(args):
         log_string('Training mean loss: %f' % (loss_sum / num_batches))
         log_string('Training accuracy: %f' % (total_correct / float(total_seen)))
 
-        if epoch % 5 == 0:
+        if epoch % 10 == 0:
             logger.info('Save model...')
             savepath = str(checkpoints_dir) + '/model.pth'
             log_string('Saving at %s' % savepath)
@@ -267,12 +267,12 @@ def main(args):
                     total_iou_deno_class[l] += np.sum(((pred_val == l) | (batch_label == l)))
 
             labelweights = labelweights.astype(np.float32) / np.sum(labelweights.astype(np.float32))
-            mIoU = np.mean(np.array(total_correct_class) / (np.array(total_iou_deno_class, dtype=np.float) + 1e-6))
+            mIoU = np.mean(np.array(total_correct_class) / (np.array(total_iou_deno_class, dtype=np.float32) + 1e-6))
             log_string('eval mean loss: %f' % (loss_sum / float(num_batches)))
             log_string('eval point avg class IoU: %f' % (mIoU))
             log_string('eval point accuracy: %f' % (total_correct / float(total_seen)))
             log_string('eval point avg class acc: %f' % (
-                np.mean(np.array(total_correct_class) / (np.array(total_seen_class, dtype=np.float) + 1e-6))))
+                np.mean(np.array(total_correct_class) / (np.array(total_seen_class, dtype=np.float32) + 1e-6))))
 
             iou_per_class_str = '------- IoU --------\n'
             for l in range(NUM_CLASSES):

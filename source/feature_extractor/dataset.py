@@ -33,7 +33,7 @@ class NPZDataset(Dataset):
         # 덜 보이는 object를 더 잘 잡기위해 필요한 가중치
         label_hist = np.zeros(1, dtype=np.int64)
         for f in self.files:
-            labels = np.load(f)["y"]
+            labels = np.load(f)["y"]-1
             m = labels.max()
             if m >= len(label_hist):
                 label_hist = np.pad(label_hist, (0, m-len(label_hist)+1))
@@ -44,7 +44,7 @@ class NPZDataset(Dataset):
 
     def __getitem__(self, idx):
         data   = np.load(self.files[idx])
-        points, mask_feature, labels = data["pos"], data["x"], data["y"]   # (2400, C), (2400,)
+        points, feature, labels = data["pos"], data["x"], data["y"] -1  # (2400, C), (2400,)
 
         # ① 포인트 수 검증
         assert points.shape[0] == self.num_point, \
@@ -54,8 +54,7 @@ class NPZDataset(Dataset):
         if self.transforms:
             points[:, :3] = self.transforms(points[:, :3])
 
-        return torch.from_numpy(points).float(), \
-               torch.from_numpy(mask_feature).long(), \
+        return torch.hstack((torch.from_numpy(points).float(), torch.from_numpy(feature).float())), \
                torch.from_numpy(labels).long()
     
 
@@ -64,3 +63,5 @@ if __name__ == "__main__":
     split = ["mug_1", "mug_2", "cube_1", "cube_2", "cylinder_1", "cylinder_2"]
 
     dataset = NPZDataset(split, dir_path, num_point=2400)
+
+    dataset.__getitem__(1)
