@@ -37,6 +37,7 @@ docker/.container.cfg
 
 # Outputs
 **/output/*
+**/Dataset/*
 **/outputs/*
 **/videos/*
 **/wandb/*

@@ -37,10 +37,7 @@ class AISLDIOLRunner(Runner):
         # desired_goal : high-level goal
         # High-Level Policy : \pi_{g}^H (a^H | s, g^H)
         # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
-        single_high_level_observation_space = gym.spaces.Dict({
-            "observation": env._unwrapped.single_observation_space["policy"]["observation"],
-            "desired_goal": gym.spaces.MultiBinary(env._unwrapped.cfg.high_level_goal_dim)
-        })
+        single_high_level_observation_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(env._unwrapped.cfg.high_level_goal_dim + env._unwrapped.single_observation_space["policy"].shape[0],))
         single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
 
         # Low-Level 정책(DDPG)을 위한 공간은 환경에서 정의 : 값만 가져오기
@@ -48,7 +45,6 @@ class AISLDIOLRunner(Runner):
         high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
         low_level_observation_space = env._unwrapped.observation_space
         low_level_action_space = env._unwrapped.action_space
-
 
         # ==== 모델을 저장할 Dictionary 초기화 ====
         models = {
@@ -88,15 +84,17 @@ class AISLDIOLRunner(Runner):
             if "_target_" in model_config:
                 if role == "policy":
                     model_config["observation_space"] = low_level_observation_space["policy"]
-                    model_config["action_space"] = low_level_action_space["policy"]
+                    model_config["action_space"] = low_level_action_space
                 else:
                     model_config["observation_space"] = low_level_observation_space["critic"]
-                    model_config["action_space"] = low_level_action_space["critic"]
+                    model_config["action_space"] = low_level_action_space
                 model_config["device"] = device
                 models["low_level"][role] = hydra.utils.instantiate(model_config)
                 print(f"  - Instantiated low-level model for role: '{role}'")
             else:
                 ValueError(f"No '_target_' field defined")
+        
+        print("✅ [INFO] Models are instatiated successfully !")
 
         return models
 
@@ -194,6 +192,8 @@ class AISLDIOLRunner(Runner):
         agents["high_level"] = self.high_level_agent
         agents["low_level"] = self.low_level_agent
 
+        print("✅ [INFO] Agents are instatiated successfully !")
+
         return agents
     
     
@@ -231,6 +231,8 @@ class AISLDIOLRunner(Runner):
             
             # HRLTrainer에 환경과 두 에이전트를 모두 전달하여 생성합니다.
             return trainer_class(env=env, agents=agents, cfg=trainer_cfg)
+
+        
         
     
     # ============== 보조 함수 ===============

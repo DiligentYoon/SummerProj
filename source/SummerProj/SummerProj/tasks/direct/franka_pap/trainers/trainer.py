@@ -44,6 +44,10 @@ class HRLTrainer(Trainer):
         # kwargs를 통해 따로 정의하지 않은 모든 config 관련 설정값들을 하나의 딕셔너리로 묶어 처리
         _cfg = copy.deepcopy(HRL_TRAINER_DEFAULT_CONFIG)
         _cfg.update(kwargs if kwargs is not None else {})
+        if _cfg["timesteps"] is None:
+            _cfg["timesteps"] = (env._unwrapped.max_episode_length * _cfg["epoch_interval"]   * \
+                                                                  _cfg["episode_interval"] * \
+                                                                  _cfg["cycle_interval"])
 
         # skrl의 Trainer를 상속받아 초기화 : Low Level Agent만 전달.
         # Superclass의 유효성 검사 통과하여 기본 기능 상속받기 위함.
@@ -56,51 +60,42 @@ class HRLTrainer(Trainer):
         if self.high_level_agent is None or self.low_level_agent is None:
             raise ValueError("The 'agents' dictionary must contain 'high_level' and 'low_level' keys.")
 
-        # Training 파라미터 (train 루프에서 쉽게 사용하기 위함)
-        self.timesteps = self.cfg["timesteps"]
-        self.epoch_interval = self.cfg["epoch_interval"]
-        self.episode_interval = self.cfg["episode_interval"]
-        self.cycle_interval = self.cfg["cycle_interval"]
-
         # AAES 파라미터
         self.aaes_params = self.cfg.get("aaes_kwargs", {})
         self.current_noise_std = self.aaes_params.get("max_std")
         self.current_random_action_ratio = self.aaes_params.get("max_uniform")
         self.action_space = self.low_level_agent.action_space
 
+        # Training 파라미터 (train 루프에서 쉽게 사용하기 위함)
+        self.epoch_interval = _cfg["epoch_interval"]
+        self.episode_interval = _cfg["episode_interval"]
+        self.cycle_interval = _cfg["cycle_interval"]
+        self.timesteps = _cfg["timesteps"]
+
         # 학습 로직 관련 변수
         self.current_high_level_action = torch.zeros((self.env.num_envs, 1), dtype=torch.long, device=self.env.device)
         self.needs_new_high_level_action = True
         self.h_start_states = {
-            "observation": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space["observation"].shape[-1]), 
+            "observation": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space.shape[-1]), 
                                        device=self.env.device, dtype=torch.float32),
-            "desired_goal": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space["desired_goal"].shape[-1]), 
+            "desired_goal": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space.shape[-1]), 
                                         device=self.env.device, dtype=torch.float32)
         }
         self.h_actions = torch.zeros((self.env.num_envs, 1), device=self.env.device)
 
-        # HER을 구현하기 위한 에피소드 버퍼
-        high_level_obs_space = self.high_level_agent.observation_space
+        # HER을 구현하기 위한 에피소드 버퍼 초기화
         low_level_obs_space = self.low_level_agent.observation_space
         low_level_action_space = self.low_level_agent.action_space
         self.max_episode_buffer_length = env._unwrapped.max_episode_length
-
-        states_buffer = {}
-        next_states_buffer = {}
-        for key, space in low_level_obs_space["policy"].items():
-            states_buffer[key] = torch.zeros((self.max_episode_buffer_length, self.env.num_envs, space.shape[-1]),
-                                             device=self.env.device, dtype=torch.float32)
-            next_states_buffer[key] = torch.zeros((self.max_episode_buffer_length, self.env.num_envs, space.shape[-1]),
-                                                  device=self.env.device, dtype=torch.float32)
         
         self.episode_buffer = EpisodeWiseReplayBuffer(self.max_episode_buffer_length, self.env.num_envs, self.env.device)
-        self.episode_buffer.create_tensor("states", size=low_level_obs_space["policy"]["observation"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("states", size=self.env._unwrapped.observation_space, dtype=torch.float32)
         self.episode_buffer.create_tensor("sub_goal", size=self.env._unwrapped.cfg.low_level_goal_dim, dtype=torch.float32)
         self.episode_buffer.create_tensor("final_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,dtype=torch.float32)
-        self.episode_buffer.create_tensor("action", size=low_level_action_space["policy"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("action", size=low_level_action_space, dtype=torch.float32)
         self.episode_buffer.create_tensor("reward", size=1, dtype=torch.float32)
         self.episode_buffer.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim, dtype=torch.float32)
-        self.episode_buffer.create_tensor("next_states", size=low_level_obs_space["policy"]["observation"], dtype=torch.float32)
+        self.episode_buffer.create_tensor("next_states", size=self.env._unwrapped.observation_space, dtype=torch.float32)
         self.episode_buffer.create_tensor("terminated", size=1, dtype=torch.bool)
         self.episode_buffer.create_tensor("truncated", size=1, dtype=torch.bool)
 
@@ -121,9 +116,6 @@ class HRLTrainer(Trainer):
     
 
     # ========== HRL Train 및 Evaluation ===========
-    # Reference : 
-
-
     def train(self) -> None:
         print("[HRLTrainer] Starting HRL Training...")
         self.high_level_agent.set_running_mode("train")
