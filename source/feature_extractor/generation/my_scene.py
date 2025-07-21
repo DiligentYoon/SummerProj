@@ -12,9 +12,9 @@ from isaacsim import SimulationApp
 config = {
     "launch_config": {
         "renderer": "RayTracedLighting",
-        "headless": False,
+        "headless": True,
     },
-    "resolution": [512, 512],
+    "resolution": [1024, 1024],
     "rt_subframes": 24,
     "num_frames": 10,
     "env_url": "/Isaac/Environments/Terrains/flat_plane.usd",
@@ -26,6 +26,8 @@ config = {
         "pointcloud": True,                         
     },
     "clear_previous_semantics": True,
+
+    "target_obj": "mug_1",
 
     "mug_1": {
         "url": "/Isaac/Props/YCB/Axis_Aligned/025_mug.usd",
@@ -184,7 +186,7 @@ cam_4 = rep.create.camera(name="Cam4")
 # ========================= Randomization graphs 등록 ===========================
 
 # Object Randomization (Pose)
-my_utils.register_scatter_objs(pallet_prim, assets_root_path, config, "cube_1")
+# my_utils.register_scatter_objs(pallet_prim, assets_root_path, config, "cube_1")
 # Light Parameter
 my_utils.register_lights_placement(pallet_prim)
 
@@ -206,7 +208,7 @@ for rp in rps:
 
 # If output directory is relative, set it relative to the current working directory
 if not os.path.isabs(config["writer_config"]["output_dir"]):
-    config["writer_config"]["output_dir"] = os.path.join(os.getcwd(), config["writer_config"]["output_dir"])
+    config["writer_config"]["output_dir"] = os.path.join(os.getcwd(), config["writer_config"]["output_dir"], config["target_obj"])
 print(f"[scene_based_sdg] Output directory={config['writer_config']['output_dir']}")
 
 # Make sure the writer type is in the registry
@@ -300,7 +302,7 @@ print(f"[scene_based_sdg] Running SDG for {num_frames} frames")
 for i in range(num_frames):
     print(f"[scene_based_sdg] \t Capturing frame {i}")
     # Trigger any on_frame registered randomizers and the writers (delta_time=0.0 to avoid advancing the timeline)
-    my_utils.place_and_settle_objects(world, pallet_prim, assets_root_path, config, "mug_2", count=1)
+    my_utils.place_and_settle_objects(world, pallet_prim, assets_root_path, config, count=1)
     rep.orchestrator.step(delta_time=0.0, rt_subframes=rt_subframes)
 # Wait for the data to be written to disk
 rep.orchestrator.wait_until_complete()

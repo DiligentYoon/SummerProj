@@ -211,11 +211,13 @@ def register_scatter_objs(table_prim, assets_root_path, config, object_class: st
     rep.randomizer.register(scatter_obj)
 
 
-def place_and_settle_objects(world, pallet_prim, assets_root_path, config, object_class: str, count: int = 1):
+def place_and_settle_objects(world, pallet_prim, assets_root_path, config, count: int = 1):
     """
         오브젝트를 팔레트 위 허공에 랜덤하게 배치한 후,
         물리 시뮬레이션을 통해 안정적으로 안착시킵니다.
     """
+    # target object 지정
+    object_class = config["target_obj"]
     
     # 팔레트에도 물리 속성을 한 번만 부여합니다.
     add_colliders(pallet_prim, approx_type="boundingCube")
