@@ -16,14 +16,15 @@ config = {
     },
     "resolution": [1024, 1024],
     "rt_subframes": 24,
-    "num_frames": 200,
+    "num_frames": 1,
     "env_url": "/Isaac/Environments/Terrains/flat_plane.usd",
     "writer": "BasicWriter",
     "writer_config": {
         "output_dir": "Dataset",
         "rgb": False,
         "semantic_segmentation": True,
-        "pointcloud": True,                         
+        "pointcloud": True,
+        "camera_params": True,                         
     },
     "clear_previous_semantics": True,
 

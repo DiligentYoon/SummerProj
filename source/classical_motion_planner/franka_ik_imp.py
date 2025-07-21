@@ -65,7 +65,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
     ground = AssetBaseCfg(
         prim_path="/World/defaultGroundPlane",
         spawn=sim_utils.GroundPlaneCfg(),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -1.05)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.7405)),
     )
     # lights
     dome_light = AssetBaseCfg(
