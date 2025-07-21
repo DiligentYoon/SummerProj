@@ -4,6 +4,11 @@ from torch_geometric.nn import MLP, knn_interpolate
 from torch_geometric.nn import PointNetConv as PointConv
 
 import numpy as np
+import os
+
+
+OBJECT_LIST = ["mug_1", "mug_2", "cube_1", "cube_2", "cylinder_1", "cylinder_2"]
+
 
 
 def normalize_pcd(pos, batch, normalize_pos_param):
@@ -173,16 +178,18 @@ class PointNet2Classification(torch.nn.Module):
         
 
 if __name__ == '__main__':
+
+    for target_obj in OBJECT_LIST:
+        dataset_root_dir = os.path.join(os.getcwd(), "Dataset", target_obj)
+        training_data_dir = os.path.join(os.getcwd(), "Dataset", "TrainingData", target_obj)
+
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    
     seg_model = PointNet2Segmentation(3, [])
-    seg_count = count_parameters(seg_model)
-    # 1381760 + 49152 = 1430912
+
+    # seg_count = count_parameters(seg_model)
+    # # 1381760 + 49152 = 1430912
     
-    cls_model = PointNet2Classification(3, [])
-    cls_count = count_parameters(cls_model)
-    # 805120 + 524288 + 131072 = 1460480
-    
-    print("\n")
-    print(f"seg_count:{seg_count}, cls_count:{cls_count}")
+    # cls_model = PointNet2Classification(3, [])
+    # cls_count = count_parameters(cls_model)
+    # # 805120 + 524288 + 131072 = 1460480

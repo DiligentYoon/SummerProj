@@ -44,6 +44,8 @@ ID_TO_INDEX_MAP = {
     CUBE_ID: 2,
 }
 
+OBJECT_LIST = ["mug_1", "mug_2", "cube_1", "cube_2", "cylinder_1", "cylinder_2"]
+
 PLOT_MODE = False
 
 print("\n")
@@ -69,7 +71,7 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, frame_id: int, s
             # ... 파일 로드 ...
             all_points.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_{frame_str}.npy")))
             all_labels.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_semantic_{frame_str}.npy")))
-            all_colors.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_rgb_{frame_str}.npy")))
+            # all_colors.append(np.load(os.path.join(base_dir, cam_dir, "pointcloud", f"pointcloud_rgb_{frame_str}.npy")))
         except FileNotFoundError:
             continue
     if not all_points:
@@ -77,13 +79,15 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, frame_id: int, s
         return
     merged_points = np.vstack(all_points)
     merged_labels = np.concatenate(all_labels)
-    merged_colors = np.vstack(all_colors)
+    # merged_colors = np.vstack(all_colors)
 
     # ---------- 2. 데이터 전처리 ----------
     object_mask = np.isin(merged_labels, OBJECT_IDS)
     background_mask = np.isin(merged_labels, PALLET_ID)
-    object_points, object_colors, object_labels = merged_points[object_mask], merged_colors[object_mask], merged_labels[object_mask]
-    background_points, background_colors, background_labels = merged_points[background_mask], merged_colors[background_mask], merged_labels[background_mask]
+    object_points, object_labels = merged_points[object_mask], merged_labels[object_mask]
+    background_points, background_labels = merged_points[background_mask], merged_labels[background_mask]
+    # object_points, object_colors, object_labels = merged_points[object_mask], merged_colors[object_mask], merged_labels[object_mask]
+    # background_points, background_colors, background_labels = merged_points[background_mask], merged_colors[background_mask], merged_labels[background_mask]
     
     print(f"분리 결과 - 오브젝트: {len(object_points)}개, 배경: {len(background_points)}개")
     
@@ -296,17 +300,16 @@ def prepare_scene_for_pointnet(base_dir: str, output_dir: str, frame_id: int):
     print(f"[✓] 전처리 완료. 샘플 저장 → {output_filepath} (Pos: {pos.shape}, X: {x.shape})")
 
 
-
-
 if __name__ == "__main__":
-    dataset_root_dir = os.path.join(os.getcwd(), "Dataset")
-    training_data_dir = os.path.join(os.getcwd(), "Dataset", "TrainingData_HACMan")
-    
-    num_frames_generated = 2 
-    for i in range(num_frames_generated):
-        prepare_and_visualize_scene(
-            base_dir=dataset_root_dir,
-            output_dir=training_data_dir,
-            frame_id=i,
-            save_gif=True # 각 프레임에 대한 시각화 GIF 저장
-        )
+    for target_obj in OBJECT_LIST:
+        dataset_root_dir = os.path.join(os.getcwd(), "Dataset", target_obj)
+        training_data_dir = os.path.join(os.getcwd(), "Dataset", "TrainingData", target_obj)
+        
+        num_frames_generated = 200
+        for i in range(num_frames_generated):
+            prepare_and_visualize_scene(
+                base_dir=dataset_root_dir,
+                output_dir=training_data_dir,
+                frame_id=i,
+                save_gif=True # 각 프레임에 대한 시각화 GIF 저장
+            )

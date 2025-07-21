@@ -16,18 +16,18 @@ config = {
     },
     "resolution": [1024, 1024],
     "rt_subframes": 24,
-    "num_frames": 10,
+    "num_frames": 200,
     "env_url": "/Isaac/Environments/Terrains/flat_plane.usd",
     "writer": "BasicWriter",
     "writer_config": {
         "output_dir": "Dataset",
-        "rgb": True,
+        "rgb": False,
         "semantic_segmentation": True,
         "pointcloud": True,                         
     },
     "clear_previous_semantics": True,
 
-    "target_obj": "mug_1",
+    "target_obj": "cylinder_1",
 
     "mug_1": {
         "url": "/Isaac/Props/YCB/Axis_Aligned/025_mug.usd",
@@ -64,7 +64,7 @@ config = {
         "class": "cylinder"
     },
 
-    "cyliner_2": {
+    "cylinder_2": {
         "url": "/Isaac/Props/YCB/Axis_Aligned/005_tomato_soop_can.usd",
         "class": "cylinder"
     },
