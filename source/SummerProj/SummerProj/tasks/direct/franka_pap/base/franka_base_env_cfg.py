@@ -171,6 +171,12 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
                                    scale=(1.5, 2.0, 1.0)),
     )
 
+    # 추후 Table
+    table = AssetBaseCfg(
+        prim_path="/World/envs/env_.*/Table",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0]),
+    )
+
     # events
     # events: EventCfg = EventCfg()
     

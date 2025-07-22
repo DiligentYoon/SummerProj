@@ -48,15 +48,15 @@ from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg, CollisionPr
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 from isaaclab.sensors import CameraCfg, Camera
 from isaaclab.utils import configclass
 from isaaclab.sensors.camera.utils import create_pointcloud_from_depth, convert_to_torch
 from isaaclab.utils.math import quat_mul, unproject_depth, transform_points
 
-FRONT_ROT = (0.61237, 0.35355, 0.35355, 0.61237)
-LEFT_ROT = (0.81013, 0.53848, -0.13613, -0.18761)
-RIGHT_ROT = (0.18761, 0.13613, -0.53848, -0.81013)
+FRONT_ROT = (0.65328, 0.2706, 0.2706, 0.65328)
+LEFT_ROT = (0.90059, 0.38942, -0.12697, -0.1455)
+RIGHT_ROT = (0.13982, 0.1332, -0.34976, -0.91672)
 
 # Experimental known (Configuration -> Simulation Transformation)
 QUAT_CON_TO_SIM = (0.5, 0.5, -0.5, -0.5)
@@ -117,6 +117,10 @@ OBJECT_DIR = {
         "url": "/005_tomato_soup_can.usd",
         "class": "cylinder"
     },
+
+    "table":{
+        "url": "/table.usd"
+    }
 }
 
 @configclass
@@ -127,7 +131,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     ground = AssetBaseCfg(
         prim_path="/World/defaultGroundPlane",
         spawn=sim_utils.GroundPlaneCfg(),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.7405)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.612)),
     )
     # lights
     dome_light = AssetBaseCfg(
@@ -136,9 +140,9 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     # Table
     table = AssetBaseCfg(
         prim_path="/World/envs/env/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0.0]),
-        spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd",
-                                   scale=(1.0, 1.0, 1.0),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.67, 0.0, -0.3], rot=[1.0, 0, 0, 0.0]),
+        spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["table"]["url"],
+                                   scale=(0.7, 1.0, 0.6),
                                    semantic_tags=[("class", "table")]
                                    ),
     )
@@ -146,7 +150,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     # object
     object: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env/Object",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.4, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.67, 0.0, -0.3], rot=[1.0, 0.0, 0.0, 0.0]),
         spawn=sim_utils.UsdFileCfg(
             usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_2"]["url"],
                 collision_props=CollisionPropertiesCfg(collision_enabled=True),
@@ -162,15 +166,25 @@ class SensorsSceneCfg(InteractiveSceneCfg):
                 semantic_tags=[("class", "object")]
             ),
         )
+    
+    # stand
+    stand = AssetBaseCfg(
+        prim_path="/World/envs/env/stand",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0.0]),
+        spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Props/Mounts/Stand/stand.usd",
+                                   scale=(1.2, 1.2, 1.2),
+                                   ),
+    )
 
 
     # sensor
     front_camera = CameraCfg(
-        prim_path=f"/World/envs/env/FrontCam",
+        prim_path=f"/World/envs/env/Table/FrontCam",
         update_period=0.1,
         height=1024,
         width=1024,
-        data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+        # data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+        data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             # 데이터 수집 시 파라미터와 동일하게 설정
             focal_length=24.0,
@@ -179,7 +193,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  
             clipping_range=(1.0, 1000000.0)
         ),
-        offset=CameraCfg.OffsetCfg(pos=(1.6, 0.0, 0.7), rot=FRONT_ROT_CON, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(1.45, 0.0, 1.9), rot=FRONT_ROT_CON, convention="world"),
         semantic_segmentation_mapping ={
             "class:table": (140, 255, 25, 255),
             "class:object": (140, 25, 255, 255),
@@ -188,11 +202,12 @@ class SensorsSceneCfg(InteractiveSceneCfg):
 
     # # sensor
     left_behind_camera = CameraCfg(
-        prim_path="/World/envs/env/Leftcam",
+        prim_path="/World/envs/env/Table/Leftcam",
         update_period=0.1,
         height=1024,
         width=1024,
-        data_types=["pointcloud"],
+        # data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+        data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             # 데이터 수집 시 파라미터와 동일하게 설정
             focal_length=24.0,
@@ -201,7 +216,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  
             clipping_range=(1.0, 1000000.0)   
         ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.13, -1.2, 0.5), rot=LEFT_ROT_CON, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(-0.5, 0.85, 1.9), rot=LEFT_ROT_CON, convention="world"),
         semantic_segmentation_mapping ={
             "class:table": (140, 255, 25, 255),
             "class:object": (140, 25, 255, 255),
@@ -210,11 +225,12 @@ class SensorsSceneCfg(InteractiveSceneCfg):
 
     # sensor
     right_behind_camera = CameraCfg(
-        prim_path="/World/envs/env/Rightcam",
+        prim_path="/World/envs/env/Table/Rightcam",
         update_period=0.1,
         height=1024,
         width=1024,
-        data_types=["pointcloud"],
+        # data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+        data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             # 데이터 수집 시 파라미터와 동일하게 설정
             focal_length=24.0,
@@ -223,12 +239,15 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
             clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
         ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.13, 1.2, 0.5), rot=RIGHT_ROT_CON, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(-0.5, -0.85, 1.9), rot=RIGHT_ROT_CON, convention="world"),
         semantic_segmentation_mapping ={
             "class:table": (140, 255, 25, 255),
             "class:object": (140, 25, 255, 255),
         }
     )
+    
+
+    # robot
     
 
 
@@ -269,37 +288,37 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         # depth : (Env, Height, Width, 1)
         # semantic_label : (Env, Height, Width, 4)
         # normal : (Env, Height, Width, 3)
-        print("-" * 40)
-        for i, cam in enumerate(cam_list):
-            #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
-            semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
-                                                                    dtype=torch.long, 
-                                                                    device=sim.device))
-            #   2. Normal Vector : (H * W, 3)
-            normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
+        # print("-" * 40)
+        # for i, cam in enumerate(cam_list):
+        #     #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
+        #     semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
+        #                                                             dtype=torch.long, 
+        #                                                             device=sim.device))
+        #     #   2. Normal Vector : (H * W, 3)
+        #     normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
 
-            #   3. Point Cloud : (H * W, 3)
-            pointcloud = create_pointcloud_from_depth(
-                intrinsic_matrix=cam.data.intrinsic_matrices[0],
-                depth=cam.data.output["distance_to_image_plane"][0],
-                position=cam.data.pos_w[0],
-                orientation=cam.data.quat_w_ros[0],
-                keep_invalid=True,
-                device=sim.device,
-            )
+        #     #   3. Point Cloud : (H * W, 3)
+        #     pointcloud = create_pointcloud_from_depth(
+        #         intrinsic_matrix=cam.data.intrinsic_matrices[0],
+        #         depth=cam.data.output["distance_to_image_plane"][0],
+        #         position=cam.data.pos_w[0],
+        #         orientation=cam.data.quat_w_ros[0],
+        #         keep_invalid=True,
+        #         device=sim.device,
+        #     )
 
-            #   4. Validation Mask : (H * W, 1)
-            valid_mask = extract_valid_mask(pointcloud, semantic_labels)
-            valid_cloud = pointcloud[valid_mask, ...]
-            valid_label = semantic_labels[valid_mask, ...]
-            valid_normal = normal_directions[valid_mask, ...]
+        #     #   4. Validation Mask : (H * W, 1)
+        #     valid_mask = extract_valid_mask(pointcloud, semantic_labels)
+        #     valid_cloud = pointcloud[valid_mask, ...]
+        #     valid_label = semantic_labels[valid_mask, ...]
+        #     valid_normal = normal_directions[valid_mask, ...]
 
-            if valid_cloud.size()[0] > 0:
-                # pc_markers.visualize(translations=valid_cloud)
-                print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
+        #     if valid_cloud.size()[0] > 0:
+        #         # pc_markers.visualize(translations=valid_cloud)
+        #         print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
         
-        print("-" * 40)
-        print("\n\n")
+        # print("-" * 40)
+        # print("\n\n")
 
 
 def convert_rgba_to_id(rgba_image: torch.Tensor, color_map: list[tuple[int, int, int]]=RGBA_MAP) -> torch.Tensor:
