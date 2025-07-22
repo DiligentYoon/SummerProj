@@ -155,7 +155,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     # object
     object: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env/Object",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.67, 0.0, -0.3], rot=[1.0, 0.0, 0.0, 0.0]),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.67, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
         spawn=sim_utils.UsdFileCfg(
             usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_2"]["url"],
                 collision_props=CollisionPropertiesCfg(collision_enabled=True),
@@ -188,8 +188,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         update_period=0.1,
         height=1024,
         width=1024,
-        # data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
-        data_types = ["rgb"],
+        data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+        # data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             # 데이터 수집 시 파라미터와 동일하게 설정
             focal_length=24.0,
@@ -211,8 +211,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         update_period=0.1,
         height=1024,
         width=1024,
-        # data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
-        data_types = ["rgb"],
+        data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+        # data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             # 데이터 수집 시 파라미터와 동일하게 설정
             focal_length=24.0,
@@ -221,7 +221,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  
             clipping_range=(1.0, 1000000.0)   
         ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.5, 0.85, 1.9), rot=LEFT_ROT_CON, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(-0.5, -0.9, 1.9), rot=LEFT_ROT_CON, convention="world"),
         semantic_segmentation_mapping ={
             "class:table": (140, 255, 25, 255),
             "class:object": (140, 25, 255, 255),
@@ -234,8 +234,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         update_period=0.1,
         height=1024,
         width=1024,
-        # data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
-        data_types = ["rgb"],
+        data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+        # data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             # 데이터 수집 시 파라미터와 동일하게 설정
             focal_length=24.0,
@@ -244,7 +244,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
             vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
             clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
         ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.5, -0.85, 1.9), rot=RIGHT_ROT_CON, convention="world"),
+        offset=CameraCfg.OffsetCfg(pos=(-0.5, 0.9, 1.9), rot=RIGHT_ROT_CON, convention="world"),
         semantic_segmentation_mapping ={
             "class:table": (140, 255, 25, 255),
             "class:object": (140, 25, 255, 255),
@@ -293,48 +293,48 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         # depth : (Env, Height, Width, 1)
         # semantic_label : (Env, Height, Width, 4)
         # normal : (Env, Height, Width, 3)
-        # total_clouds = None
-        # total_labels = None
-        # total_normals = None
-        # print("-" * 40)
-        # for i, cam in enumerate(cam_list):
-        #     #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
-        #     semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
-        #                                                             dtype=torch.long, 
-        #                                                             device=sim.device))
-        #     #   2. Normal Vector : (H * W, 3)
-        #     normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
+        total_clouds = None
+        total_labels = None
+        total_normals = None
+        print("-" * 40)
+        for i, cam in enumerate(cam_list):
+            #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
+            semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
+                                                                    dtype=torch.long, 
+                                                                    device=sim.device))
+            #   2. Normal Vector : (H * W, 3)
+            normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
 
-        #     #   3. Point Cloud : (H * W, 3)
-        #     pointcloud = create_pointcloud_from_depth(
-        #         intrinsic_matrix=cam.data.intrinsic_matrices[0],
-        #         depth=cam.data.output["distance_to_image_plane"][0],
-        #         position=cam.data.pos_w[0],
-        #         orientation=cam.data.quat_w_ros[0],
-        #         keep_invalid=True,
-        #         device=sim.device,
-        #     )
+            #   3. Point Cloud : (H * W, 3)
+            pointcloud = create_pointcloud_from_depth(
+                intrinsic_matrix=cam.data.intrinsic_matrices[0],
+                depth=cam.data.output["distance_to_image_plane"][0],
+                position=cam.data.pos_w[0],
+                orientation=cam.data.quat_w_ros[0],
+                keep_invalid=True,
+                device=sim.device,
+            )
 
-        #     #   4. Validation Mask : (H * W, 1)
-        #     valid_mask = extract_valid_mask(pointcloud, semantic_labels)
-        #     valid_cloud = pointcloud[valid_mask, ...]
-        #     valid_label = semantic_labels[valid_mask, ...]
-        #     valid_normal = normal_directions[valid_mask, ...]
+            #   4. Validation Mask : (H * W, 1)
+            valid_mask = extract_valid_mask(pointcloud, semantic_labels)
+            valid_cloud = pointcloud[valid_mask, ...]
+            valid_label = semantic_labels[valid_mask, ...]
+            valid_normal = normal_directions[valid_mask, ...]
 
-            # if valid_cloud.size()[0] > 0:
-            #     # pc_markers.visualize(translations=valid_cloud)
-            #     print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
-            #     if total_clouds is None:
-            #         total_clouds = valid_cloud
-            #         total_labels = valid_label
-            #         total_normals = valid_normal
-            #     else:
-            #         total_clouds = torch.concat((total_clouds, valid_cloud), dim=0)
-            #         total_labels = torch.concat((total_labels, valid_label), dim=0)
-            #         total_normals = torch.concat((total_normals, valid_normal), dim=0)
+            if valid_cloud.size()[0] > 0:
+                # pc_markers.visualize(translations=valid_cloud)
+                print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
+                if total_clouds is None:
+                    total_clouds = valid_cloud
+                    total_labels = valid_label
+                    total_normals = valid_normal
+                else:
+                    total_clouds = torch.concat((total_clouds, valid_cloud), dim=0)
+                    total_labels = torch.concat((total_labels, valid_label), dim=0)
+                    total_normals = torch.concat((total_normals, valid_normal), dim=0)
         
-        # print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
-        # pc_markers.visualize(translations=total_clouds)
+        print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
+        pc_markers.visualize(translations=total_clouds)
         print("-" * 40)
         print("\n\n")
 
