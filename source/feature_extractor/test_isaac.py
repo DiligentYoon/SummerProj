@@ -187,40 +187,48 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     )
 
     # # sensor
-    # left_behind_camera = CameraCfg(
-    #     prim_path="/World/envs/env/Leftcam",
-    #     update_period=0.1,
-    #     height=1024,
-    #     width=1024,
-    #     data_types=["pointcloud"],
-    #     spawn=sim_utils.PinholeCameraCfg(
-    #         # 데이터 수집 시 파라미터와 동일하게 설정
-    #         focal_length=24.0,
-    #         focus_distance=400.0,
-    #         horizontal_aperture=20.954999923706055,
-    #         vertical_aperture=15.290800094604492,  
-    #         clipping_range=(1.0, 1000000.0)   
-    #     ),
-    #     offset=CameraCfg.OffsetCfg(pos=(-0.13, -1.2, 0.5), rot=LEFT_ROT_CON, convention="world"),
-    # )
+    left_behind_camera = CameraCfg(
+        prim_path="/World/envs/env/Leftcam",
+        update_period=0.1,
+        height=1024,
+        width=1024,
+        data_types=["pointcloud"],
+        spawn=sim_utils.PinholeCameraCfg(
+            # 데이터 수집 시 파라미터와 동일하게 설정
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.954999923706055,
+            vertical_aperture=15.290800094604492,  
+            clipping_range=(1.0, 1000000.0)   
+        ),
+        offset=CameraCfg.OffsetCfg(pos=(-0.13, -1.2, 0.5), rot=LEFT_ROT_CON, convention="world"),
+        semantic_segmentation_mapping ={
+            "class:table": (140, 255, 25, 255),
+            "class:object": (140, 25, 255, 255),
+        }
+    )
 
-    # # sensor
-    # right_behind_camera = CameraCfg(
-    #     prim_path="/World/envs/env/Rightcam",
-    #     update_period=0.1,
-    #     height=1024,
-    #     width=1024,
-    #     data_types=["pointcloud"],
-    #     spawn=sim_utils.PinholeCameraCfg(
-    #         # 데이터 수집 시 파라미터와 동일하게 설정
-    #         focal_length=24.0,
-    #         focus_distance=400.0,
-    #         horizontal_aperture=20.954999923706055,
-    #         vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
-    #         clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
-    #     ),
-    #     offset=CameraCfg.OffsetCfg(pos=(-0.13, 1.2, 0.5), rot=RIGHT_ROT_CON, convention="world"),
-    # )
+    # sensor
+    right_behind_camera = CameraCfg(
+        prim_path="/World/envs/env/Rightcam",
+        update_period=0.1,
+        height=1024,
+        width=1024,
+        data_types=["pointcloud"],
+        spawn=sim_utils.PinholeCameraCfg(
+            # 데이터 수집 시 파라미터와 동일하게 설정
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.954999923706055,
+            vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
+            clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
+        ),
+        offset=CameraCfg.OffsetCfg(pos=(-0.13, 1.2, 0.5), rot=RIGHT_ROT_CON, convention="world"),
+        semantic_segmentation_mapping ={
+            "class:table": (140, 255, 25, 255),
+            "class:object": (140, 25, 255, 255),
+        }
+    )
     
 
 
@@ -271,9 +279,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         total_label = []
         print("-" * 40)
         for i in range(3):
-            semantic_labels = convert_rgba_to_id(convert_rgba_to_id(front_camera.data.output["semantic_segmentation"][i], 
+            semantic_labels = convert_rgba_to_id(convert_to_torch(front_camera.data.output["semantic_segmentation"][0], 
                                                                     dtype=torch.long, 
                                                                     device=sim.device))
+            normal_directions = convert_to_torch(front_camera.data.output["normals"])[0].reshape(-1, 3)
 
             pointcloud = create_pointcloud_from_depth(
                 intrinsic_matrix=front_camera.data.intrinsic_matrices[i],
@@ -286,6 +295,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             pts_idx_to_keep = torch.all(torch.logical_and(~torch.isnan(pointcloud), ~torch.isinf(pointcloud)), dim=1)
             valid_cloud = pointcloud[pts_idx_to_keep, ...]
             valid_label = semantic_labels[pts_idx_to_keep, ...]
+            valid_normal = normal_directions[pts_idx_to_keep, ...]
 
             if valid_cloud.size()[0] > 0:
                 # pc_markers.visualize(translations=valid_cloud)
