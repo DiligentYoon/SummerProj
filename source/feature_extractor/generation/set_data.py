@@ -46,7 +46,7 @@ ID_TO_INDEX_MAP = {
 
 OBJECT_LIST = ["mug_1", "mug_2", "cube_1", "cube_2", "cylinder_1", "cylinder_2"]
 
-PLOT_MODE = False
+PLOT_MODE = True
 
 print("\n")
 print("-" * 20)
@@ -308,11 +308,12 @@ def prepare_scene_for_pointnet(base_dir: str, output_dir: str, frame_id: int):
 
 
 if __name__ == "__main__":
+
     for target_obj in OBJECT_LIST:
         dataset_root_dir = os.path.join(os.getcwd(), "Dataset", target_obj)
         training_data_dir = os.path.join(os.getcwd(), "Dataset", "TrainingData", target_obj)
         testing_data_dir = os.path.join(os.getcwd(), "Dataset", "TestingData", target_obj)
-        
+            
         num_frames_generated = 200
         for i in range(num_frames_generated):
             prepare_and_visualize_scene(

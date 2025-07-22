@@ -239,7 +239,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     cfg = RAY_CASTER_MARKER_CFG.replace(prim_path="/Visuals/CameraPointCloud")
     cfg.markers["hit"].radius = 0.002
     pc_markers = VisualizationMarkers(cfg)
-    front_camera: Camera = scene["front_camera"]
+    cam_list: list[Camera, Camera, Camera] = [scene["front_camera"], scene["left_behind_camera"], scene["right_behind_camera"]]
     sim_dt = sim.get_physics_dt()
     sim_time = 0.0
     count = 0
@@ -264,42 +264,39 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         # update buffers
         scene.update(sim_dt)
 
-
+        
         # 각 카메라에 담긴 정보 : (Env, Height, Width, k)
         # depth : (Env, Height, Width, 1)
         # semantic_label : (Env, Height, Width, 4)
-
-        # - valid_mask => depth 기준으로 추출 (1024, 1024, 1) : (1024, 1024, 1) -> (vx, vy, 1)
-        # - valid_labels => 
-        #   1. RGBA -> Seg label로 변환 : (1024, 1024, 4) -> (1024, 1024, 1)
-        #   2. valid_mask 적용하여 valid label 추출 : (1024, 1024, 1) -> (vx, vy, 1)
-        #   3. label <---> pointcloud 매핑을 위해 valid_label flatten : (vx, vy, 1) -> (vx * vy, 1)
-        # - pointcloud => valid depth 이미지에 대해서 수행 : (vx, vy, 1) -> (vx * vy, 3)
-        total_pcd = []
-        total_label = []
+        # normal : (Env, Height, Width, 3)
         print("-" * 40)
-        for i in range(3):
-            semantic_labels = convert_rgba_to_id(convert_to_torch(front_camera.data.output["semantic_segmentation"][0], 
+        for i, cam in enumerate(cam_list):
+            #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
+            semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
                                                                     dtype=torch.long, 
                                                                     device=sim.device))
-            normal_directions = convert_to_torch(front_camera.data.output["normals"])[0].reshape(-1, 3)
+            #   2. Normal Vector : (H * W, 3)
+            normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
 
+            #   3. Point Cloud : (H * W, 3)
             pointcloud = create_pointcloud_from_depth(
-                intrinsic_matrix=front_camera.data.intrinsic_matrices[i],
-                depth=front_camera.data.output["distance_to_image_plane"][i],
-                position=front_camera.data.pos_w[i],
-                orientation=front_camera.data.quat_w_ros[i],
+                intrinsic_matrix=cam.data.intrinsic_matrices[0],
+                depth=cam.data.output["distance_to_image_plane"][0],
+                position=cam.data.pos_w[0],
+                orientation=cam.data.quat_w_ros[0],
                 keep_invalid=True,
                 device=sim.device,
             )
-            pts_idx_to_keep = torch.all(torch.logical_and(~torch.isnan(pointcloud), ~torch.isinf(pointcloud)), dim=1)
-            valid_cloud = pointcloud[pts_idx_to_keep, ...]
-            valid_label = semantic_labels[pts_idx_to_keep, ...]
-            valid_normal = normal_directions[pts_idx_to_keep, ...]
+
+            #   4. Validation Mask : (H * W, 1)
+            valid_mask = extract_valid_mask(pointcloud, semantic_labels)
+            valid_cloud = pointcloud[valid_mask, ...]
+            valid_label = semantic_labels[valid_mask, ...]
+            valid_normal = normal_directions[valid_mask, ...]
 
             if valid_cloud.size()[0] > 0:
                 # pc_markers.visualize(translations=valid_cloud)
-                print(f"Cam_{i} Valid points 개수 : {valid_cloud.shape[0]}")
+                print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
         
         print("-" * 40)
         print("\n\n")
@@ -346,6 +343,23 @@ def convert_rgba_to_id(rgba_image: torch.Tensor, color_map: list[tuple[int, int,
 
     # (H, W) -> (H * W)로 평탄화하여 반환
     return id_map.flatten()
+
+
+def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
+    """
+        Valid 조건 :
+            1. Position값이 NaN이나 Inf가 아닌 Point
+            2. Label값이 Table 및 Object인 Point
+    """
+    # (H * W, 1)
+    pcd_valid = torch.all(~torch.isnan(pointcloud) | ~torch.isinf(pointcloud), dim=-1)
+    # (H * W, 1)
+    label_valid = torch.logical_or(label == torch.ones(1, dtype=torch.long, device=label.device), 
+                                   label == 2 * torch.ones(1, dtype=torch.long, device=label.device))
+    
+    return torch.logical_and(pcd_valid, label_valid)
+
+
 
 
 def main():
