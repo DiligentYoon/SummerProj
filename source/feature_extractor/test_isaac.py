@@ -120,6 +120,10 @@ OBJECT_DIR = {
 
     "table":{
         "url": "/table.usd"
+    },
+
+    "stand": {
+        "url": "/stand.usd"
     }
 }
 
@@ -142,6 +146,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         prim_path="/World/envs/env/Table",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0.67, 0.0, -0.3], rot=[1.0, 0, 0, 0.0]),
         spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["table"]["url"],
+                                   collision_props=CollisionPropertiesCfg(collision_enabled=True),
                                    scale=(0.7, 1.0, 0.6),
                                    semantic_tags=[("class", "table")]
                                    ),
@@ -171,7 +176,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     stand = AssetBaseCfg(
         prim_path="/World/envs/env/stand",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0.0]),
-        spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Props/Mounts/Stand/stand.usd",
+        spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["stand"]["url"],
                                    scale=(1.2, 1.2, 1.2),
                                    ),
     )
