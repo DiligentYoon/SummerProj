@@ -134,7 +134,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     # ground plane
     ground = AssetBaseCfg(
         prim_path="/World/defaultGroundPlane",
-        spawn=sim_utils.GroundPlaneCfg(),
+        spawn=sim_utils.GroundPlaneCfg(semantic_tags=[("class", "ground")]),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -0.612)),
     )
     # lights
@@ -186,8 +186,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     front_camera = CameraCfg(
         prim_path=f"/World/envs/env/Table/FrontCam",
         update_period=0.1,
-        height=1024,
-        width=1024,
+        height=480,
+        width=640,
         data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
         # data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
@@ -209,8 +209,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     left_behind_camera = CameraCfg(
         prim_path="/World/envs/env/Table/Leftcam",
         update_period=0.1,
-        height=1024,
-        width=1024,
+        height=480,
+        width=640,
         data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
         # data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
@@ -232,8 +232,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     right_behind_camera = CameraCfg(
         prim_path="/World/envs/env/Table/Rightcam",
         update_period=0.1,
-        height=1024,
-        width=1024,
+        height=480,
+        width=640,
         data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
         # data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
@@ -264,6 +264,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     cfg.markers["hit"].radius = 0.002
     pc_markers = VisualizationMarkers(cfg)
     cam_list: list[Camera, Camera, Camera] = [scene["front_camera"], scene["left_behind_camera"], scene["right_behind_camera"]]
+    # cam_list: list[Camera] = [scene["front_camera"]]
     sim_dt = sim.get_physics_dt()
     sim_time = 0.0
     count = 0
@@ -333,8 +334,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     total_labels = torch.concat((total_labels, valid_label), dim=0)
                     total_normals = torch.concat((total_normals, valid_normal), dim=0)
         
-        print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
+        # print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
         pc_markers.visualize(translations=total_clouds)
+        # pc_markers.visualize(translations=pointcloud)
         print("-" * 40)
         print("\n\n")
 
@@ -403,7 +405,7 @@ def main():
     """Main function."""
 
     # Initialize the simulation context
-    sim_cfg = sim_utils.SimulationCfg(dt=0.005, device=args_cli.device)
+    sim_cfg = sim_utils.SimulationCfg(dt=0.1, device=args_cli.device)
     sim = sim_utils.SimulationContext(sim_cfg)
     # Set main camera
     sim.set_camera_view(eye=[3.5, 3.5, 3.5], target=[0.0, 0.0, 0.0])
