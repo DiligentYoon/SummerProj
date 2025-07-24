@@ -49,7 +49,7 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
-from isaaclab.sensors import CameraCfg, Camera
+from isaaclab.sensors import CameraCfg, Camera, TiledCamera, TiledCameraCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors.camera.utils import create_pointcloud_from_depth, convert_to_torch
 from isaaclab.utils.math import quat_mul, unproject_depth, transform_points
@@ -183,27 +183,42 @@ class SensorsSceneCfg(InteractiveSceneCfg):
 
 
     # sensor
-    front_camera = CameraCfg(
-        prim_path=f"/World/envs/env/Table/FrontCam",
+    front_camera = TiledCameraCfg(
+        prim_path="/World/envs/env/Cam",
         update_period=0.1,
-        height=480,
-        width=640,
+        height=120,
+        width=160,
         data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
-        # data_types = ["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            # 데이터 수집 시 파라미터와 동일하게 설정
             focal_length=24.0,
             focus_distance=400.0,
-            horizontal_aperture=20.954999923706055,
-            vertical_aperture=15.290800094604492,  
-            clipping_range=(1.0, 1000000.0)
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 1000000.0)
         ),
-        offset=CameraCfg.OffsetCfg(pos=(1.45, 0.0, 1.9), rot=FRONT_ROT_CON, convention="world"),
-        semantic_segmentation_mapping ={
-            "class:table": TABLE_RGBA,
-            "class:object": OBJECT_RGBA,
-        }
+        offset=TiledCameraCfg.OffsetCfg(pos=(1.45, 0.0, 1.9), rot=FRONT_ROT_CON, convention="world")
     )
+
+
+    # front_camera = CameraCfg(
+    #     prim_path=f"/World/envs/env/Table/FrontCam",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+    #     # data_types = ["rgb"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         # 데이터 수집 시 파라미터와 동일하게 설정
+    #         focal_length=24.0,
+    #         focus_distance=400.0,
+    #         horizontal_aperture=20.954999923706055,
+    #         clipping_range=(0.1, 10000000.0)
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(pos=(1.45, 0.0, 1.9), rot=FRONT_ROT_CON, convention="world"),
+    #     semantic_segmentation_mapping ={
+    #         "class:table": TABLE_RGBA,
+    #         "class:object": OBJECT_RGBA,
+    #     }
+    # )
 
     # # sensor
     # left_behind_camera = CameraCfg(
@@ -261,7 +276,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     cfg.markers["hit"].radius = 0.002
     pc_markers = VisualizationMarkers(cfg)
     # cam_list: list[Camera, Camera, Camera] = [scene["front_camera"], scene["left_behind_camera"], scene["right_behind_camera"]]
-    cam_list: list[Camera] = [scene["front_camera"]]
+    cam_list: list[TiledCamera] = [scene["front_camera"]]
     sim_dt = sim.get_physics_dt()
     sim_time = 0.0
     count = 0
@@ -294,14 +309,14 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         total_clouds = None
         total_labels = None
         total_normals = None
-        print("-" * 40)
+        # print("-" * 40)
         for i, cam in enumerate(cam_list):
             #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
-            semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
-                                                                    dtype=torch.long, 
-                                                                    device=sim.device), RGBA_MAP)
-            #   2. Normal Vector : (H * W, 3)
-            normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
+            # semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
+            #                                                         dtype=torch.long, 
+            #                                                         device=sim.device), RGBA_MAP)
+            # #   2. Normal Vector : (H * W, 3)
+            # normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
 
             #   3. Point Cloud : (H * W, 3)
             pointcloud = create_pointcloud_from_depth(
@@ -334,8 +349,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         # # print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
         # pc_markers.visualize(translations=total_clouds)
         pc_markers.visualize(translations=pointcloud)
-        print("-" * 40)
-        print("\n\n")
+        # print("-" * 40)
+        # print("\n\n")
 
 
 def convert_rgba_to_id(rgba_image: torch.Tensor, color_map: list[tuple[int, int, int, int]]) -> torch.Tensor:
