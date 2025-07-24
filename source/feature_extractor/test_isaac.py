@@ -69,8 +69,8 @@ LEFT_ROT_CON = tuple(quat_mul(torch.tensor(LEFT_ROT), torch.tensor(QUAT_SIM_TO_C
 RIGHT_ROT_CON = tuple(quat_mul(torch.tensor(RIGHT_ROT), torch.tensor(QUAT_SIM_TO_CON)).numpy())
 
 BACKGROUND_RGBA = (0, 0, 0, 255)
-TABLE_RGBA = (140, 255, 25, 255)
-OBJECT_RGBA = (140, 25, 255, 255)
+TABLE_RGBA = (0, 255, 0, 255)    # 순수한 녹색
+OBJECT_RGBA = (0, 0, 255, 255)   # 순수한 파란색
 RGBA_MAP = [
     BACKGROUND_RGBA,
     TABLE_RGBA,
@@ -200,8 +200,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         ),
         offset=CameraCfg.OffsetCfg(pos=(1.45, 0.0, 1.9), rot=FRONT_ROT_CON, convention="world"),
         semantic_segmentation_mapping ={
-            "class:table": (140, 255, 25, 255),
-            "class:object": (140, 25, 255, 255),
+            "class:table": TABLE_RGBA,
+            "class:object": OBJECT_RGBA,
         }
     )
 
@@ -299,7 +299,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
             semantic_labels = convert_rgba_to_id(convert_to_torch(cam.data.output["semantic_segmentation"][0], 
                                                                     dtype=torch.long, 
-                                                                    device=sim.device))
+                                                                    device=sim.device), RGBA_MAP)
             #   2. Normal Vector : (H * W, 3)
             normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
 
@@ -314,86 +314,82 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             )
 
             #   4. Validation Mask : (H * W, 1)
-            valid_mask = extract_valid_mask(pointcloud, semantic_labels)
-            valid_cloud = pointcloud[valid_mask, ...]
-            valid_label = semantic_labels[valid_mask, ...]
-            valid_normal = normal_directions[valid_mask, ...]
+        #     valid_mask = extract_valid_mask(pointcloud, semantic_labels)
+        #     valid_cloud = pointcloud[valid_mask, ...]
+        #     valid_label = semantic_labels[valid_mask, ...]
+        #     valid_normal = normal_directions[valid_mask, ...]
 
-            if valid_cloud.size()[0] > 0:
-                # pc_markers.visualize(translations=valid_cloud)
-                print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
-                if total_clouds is None:
-                    total_clouds = valid_cloud
-                    total_labels = valid_label
-                    total_normals = valid_normal
-                else:
-                    total_clouds = torch.concat((total_clouds, valid_cloud), dim=0)
-                    total_labels = torch.concat((total_labels, valid_label), dim=0)
-                    total_normals = torch.concat((total_normals, valid_normal), dim=0)
+        #     if valid_cloud.size()[0] > 0:
+        #         # pc_markers.visualize(translations=valid_cloud)
+        #         print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
+        #         if total_clouds is None:
+        #             total_clouds = valid_cloud
+        #             total_labels = valid_label
+        #             total_normals = valid_normal
+        #         else:
+        #             total_clouds = torch.concat((total_clouds, valid_cloud), dim=0)
+        #             total_labels = torch.concat((total_labels, valid_label), dim=0)
+        #             total_normals = torch.concat((total_normals, valid_normal), dim=0)
         
-        # print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
-        pc_markers.visualize(translations=total_clouds)
-        # pc_markers.visualize(translations=pointcloud)
+        # # print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
+        # pc_markers.visualize(translations=total_clouds)
+        pc_markers.visualize(translations=pointcloud)
         print("-" * 40)
         print("\n\n")
 
 
-def convert_rgba_to_id(rgba_image: torch.Tensor, color_map: list[tuple[int, int, int]]=RGBA_MAP) -> torch.Tensor:
+def convert_rgba_to_id(rgba_image: torch.Tensor, color_map: list[tuple[int, int, int, int]]) -> torch.Tensor:
     """
     (H, W, 4) RGBA 시맨틱 이미지를 (H * W) ID 텐서로 효율적으로 변환합니다.
+    이 함수는 for 루프 대신 벡터화된 연산을 사용하여 매우 빠릅니다.
 
     Args:
         rgba_image (torch.Tensor): (H, W, 4) 형상의 RGBA 이미지. torch.uint8 타입.
-        color_map (list[tuple[int, int, int]]): 클래스 ID를 인덱스로 하는 색상(RGB) 리스트.
-            예: [(0,0,0), (255,0,0), (0,255,0)] -> ID 0, 1, 2에 해당.
+        color_map (list[tuple[int, int, int, int]]): 클래스 ID를 인덱스로 하는 색상(RGBA) 리스트.
 
     Returns:
         torch.Tensor: (H * W) 형상의 1D 정수 ID 텐서.
     """
-
-    # 입력 이미지의 크기와 디바이스 정보 가져오기
     height, width, _ = rgba_image.shape
     device = rgba_image.device
 
-    # 최종 ID 맵을 0 (배경 ID)으로 초기화
-    # 각 픽셀에 어떤 클래스 ID가 들어갈지 저장할 텐서
-    id_map = torch.zeros((height, width), dtype=torch.long, device=device)
-
-    # color_map을 텐서로 변환하여 GPU로 이동
+    # 컬러맵을 (C, 4) 텐서로 변환 (C는 클래스 수)
     colors_tensor = torch.tensor(color_map, dtype=torch.uint8, device=device)
 
-    # 클래스 ID 1부터 순회 (0은 배경이므로 이미 처리됨)
-    for class_id, color in enumerate(colors_tensor):
-        mask = torch.all(rgba_image == color, dim=-1)
-        # 배경(ID 0)은 건너뛰어 불필요한 연산 방지
-        if class_id == 0:
-            print(f"class : None, # of points : {torch.sum(mask)}")
-            continue
-        
-        # 현재 클래스의 색상과 일치하는 모든 픽셀에 대한 마스크 생성
-        mask = torch.all(rgba_image == color, dim=-1)
-        print(f"class : {class_id}, # of points : {torch.sum(mask)}")
+    # (H, W, 4) 이미지를 (H, W, 1, 4)로 차원 확장
+    # (H, W, 1, 4)와 (C, 4)를 브로드캐스팅하여 비교 -> 결과는 (H, W, C, 4)
+    comparison = (rgba_image.unsqueeze(2) == colors_tensor)
 
-        # 마스크가 True인 위치에 현재 클래스 ID를 할당
-        id_map[mask] = class_id
+    # 마지막 채널(RGBA) 차원에 대해 모두 일치하는지 확인 -> 결과는 (H, W, C)
+    mask = torch.all(comparison, dim=-1)
+
+    # 각 픽셀에 대해 True인 첫 번째 클래스 ID를 찾음 (C 차원에서 argmax)
+    # .long()을 통해 boolean 텐서를 0과 1로 변환
+    id_map = torch.argmax(mask.long(), dim=-1)
 
     # (H, W) -> (H * W)로 평탄화하여 반환
     return id_map.flatten()
 
+# 사용 예시
+# semantic_labels = convert_rgba_to_id_vectorized(rgba_image_tensor, RGBA_MAP)
+
 
 def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
     """
-        Valid 조건 :
-            1. Position값이 NaN이나 Inf가 아닌 Point
-            2. Label값이 Table 및 Object인 Point
+    유효한 포인트 클라우드 마스크를 추출합니다.
+    1. 포인트 좌표에 NaN이나 Inf가 없어야 합니다.
+    2. 레이블이 1(Table) 또는 2(Object)여야 합니다.
     """
-    # (H * W, 1)
-    pcd_valid = torch.all(~torch.isnan(pointcloud) | ~torch.isinf(pointcloud), dim=-1)
-    # (H * W, 1)
-    label_valid = torch.logical_or(label == torch.ones(1, dtype=torch.long, device=label.device), 
-                                   label == 2 * torch.ones(1, dtype=torch.long, device=label.device))
+    # 1. torch.isfinite()를 사용하여 NaN과 Inf를 한 번에 효율적으로 확인합니다.
+    #    pointcloud의 모든 좌표(x, y, z)가 유한한 수인지 검사합니다.
+    pcd_valid = torch.all(torch.isfinite(pointcloud), dim=-1)
+
+    # 2. 불필요한 텐서 생성을 제거하고 간결하게 비교합니다.
+    #    '|' 연산자는 tensor에서 torch.logical_or와 동일하게 작동합니다.
+    label_valid = (label == 1) | (label == 2)
     
-    return torch.logical_and(pcd_valid, label_valid)
+    # 3. 두 마스크를 AND 연산하여 최종 결과를 반환합니다.
+    return pcd_valid & label_valid
 
 
 
