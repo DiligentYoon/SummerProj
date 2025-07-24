@@ -49,7 +49,8 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
-from isaaclab.sensors import CameraCfg, Camera, Camera, CameraCfg
+from isaaclab.sensors import CameraCfg, Camera
+from isaaclab_assets.robots.franka import FRANKA_PANDA_CFG
 from isaaclab.utils import configclass
 from isaaclab.sensors.camera.utils import create_pointcloud_from_depth, convert_to_torch
 from isaaclab.utils.math import quat_mul, unproject_depth, transform_points
@@ -57,25 +58,6 @@ from isaaclab.utils.math import quat_mul, unproject_depth, transform_points
 FRONT_ROT = (0.65004, 0.26831, 0.26532, 0.65959)
 LEFT_ROT = (0.8966, 0.3504, -0.0986, -0.2523)
 RIGHT_ROT = (-0.27194, -0.11369, 0.3686, 0.88163)
-
-# Experimental known (Configuration -> Simulation Transformation)
-QUAT_CON_TO_SIM = (0.5, 0.5, -0.5, -0.5)
-# Inverse Quaternion (w, -x, -y, -z)
-QUAT_SIM_TO_CON = (0.5, -0.5, 0.5, 0.5)
-
-# Tranformation from setted simulation quat to offset configuration thing
-FRONT_ROT_CON = tuple(quat_mul(torch.tensor(FRONT_ROT), torch.tensor(QUAT_SIM_TO_CON)).numpy())
-LEFT_ROT_CON = tuple(quat_mul(torch.tensor(LEFT_ROT), torch.tensor(QUAT_SIM_TO_CON)).numpy())
-RIGHT_ROT_CON = tuple(quat_mul(torch.tensor(RIGHT_ROT), torch.tensor(QUAT_SIM_TO_CON)).numpy())
-
-BACKGROUND_RGBA = (0, 0, 0, 255)
-TABLE_RGBA = (0, 255, 0, 255)    # 순수한 녹색
-OBJECT_RGBA = (0, 0, 255, 255)   # 순수한 파란색
-RGBA_MAP = [
-    BACKGROUND_RGBA,
-    TABLE_RGBA,
-    OBJECT_RGBA
-]
 
 OBJECT_DIR = {
     "mug_1": {
@@ -181,6 +163,38 @@ class SensorsSceneCfg(InteractiveSceneCfg):
                                    ),
     )
 
+    robot: ArticulationCfg = FRANKA_PANDA_CFG.replace(
+        prim_path="/World/envs/env_.*/Robot",
+        spawn=sim_utils.UsdFileCfg(
+        usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Robots/FrankaEmika/panda_instanceable.usd",
+        activate_contact_sensors=False,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            max_depenetration_velocity=5.0),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=True, solver_position_iteration_count=12, solver_velocity_iteration_count=0),
+        # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
+        ),
+        init_state=ArticulationCfg.InitialStateCfg(
+            pos=(0.0, 0.0, 0.0),
+            joint_pos={
+            "panda_joint1": 0.0,
+            "panda_joint2": -0.569,
+            "panda_joint3": 0.0,
+            "panda_joint4": -2.810,
+            "panda_joint5": 0.0,
+            "panda_joint6": 3.037,
+            "panda_joint7": 0.741,
+            "panda_finger_joint.*": 0.04,
+        }
+        ))
+    # Impedance Controller를 사용하는 경우, 액추에이터 PD제어 모델 사용 X (중복 토크 계산)
+    # 액추에이터에 Impedance Controller가 붙음으로써 최하단 제어기의 역할을 하게 되는 개념.
+    robot.actuators["panda_shoulder"].stiffness = 0.0
+    robot.actuators["panda_shoulder"].damping = 0.0
+    robot.actuators["panda_forearm"].stiffness = 0.0
+    robot.actuators["panda_forearm"].damping = 0.0
+
 
     # sensor
     front_camera = CameraCfg(
@@ -264,13 +278,13 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             scene.write_data_to_sim()
             scene.reset()
 
+            # Object ID 미리 뽑아두기.
             object_id = None
             semantic_info = cam_list[0].data.info[0]["semantic_segmentation"]["idToLabels"]
             for key, value in semantic_info.items():
-                # 내부 딕셔너리의 'class' 값이 'object'와 일치하는지 확인합니다.
                 if value.get('class') == 'object':
-                    object_id = key  # 일치하면 해당 키를 저장하고
-                    break            # 반복을 중단합니다.
+                    object_id = key  
+                    break      
 
             print("[INFO]: Resetting robot state...")
 
