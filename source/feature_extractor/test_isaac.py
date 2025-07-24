@@ -206,53 +206,50 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     )
 
     # # sensor
-    left_behind_camera = CameraCfg(
-        prim_path="/World/envs/env/Table/Leftcam",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
-        # data_types = ["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            # 데이터 수집 시 파라미터와 동일하게 설정
-            focal_length=24.0,
-            focus_distance=400.0,
-            horizontal_aperture=20.954999923706055,
-            vertical_aperture=15.290800094604492,  
-            clipping_range=(1.0, 1000000.0)   
-        ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.5, -0.9, 1.9), rot=LEFT_ROT_CON, convention="world"),
-        semantic_segmentation_mapping ={
-            "class:table": (140, 255, 25, 255),
-            "class:object": (140, 25, 255, 255),
-        }
-    )
+    # left_behind_camera = CameraCfg(
+    #     prim_path="/World/envs/env/Table/Leftcam",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+    #     # data_types = ["rgb"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         # 데이터 수집 시 파라미터와 동일하게 설정
+    #         focal_length=24.0,
+    #         focus_distance=400.0,
+    #         horizontal_aperture=20.954999923706055,
+    #         vertical_aperture=15.290800094604492,  
+    #         clipping_range=(1.0, 1000000.0)   
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(pos=(-0.5, -0.9, 1.9), rot=LEFT_ROT_CON, convention="world"),
+    #     semantic_segmentation_mapping ={
+    #         "class:table": (140, 255, 25, 255),
+    #         "class:object": (140, 25, 255, 255),
+    #     }
+    # )
 
-    # sensor
-    right_behind_camera = CameraCfg(
-        prim_path="/World/envs/env/Table/Rightcam",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
-        # data_types = ["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            # 데이터 수집 시 파라미터와 동일하게 설정
-            focal_length=24.0,
-            focus_distance=400.0,
-            horizontal_aperture=20.954999923706055,
-            vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
-            clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
-        ),
-        offset=CameraCfg.OffsetCfg(pos=(-0.5, 0.9, 1.9), rot=RIGHT_ROT_CON, convention="world"),
-        semantic_segmentation_mapping ={
-            "class:table": (140, 255, 25, 255),
-            "class:object": (140, 25, 255, 255),
-        }
-    )
-    
-
-    # robot
+    # # sensor
+    # right_behind_camera = CameraCfg(
+    #     prim_path="/World/envs/env/Table/Rightcam",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["distance_to_image_plane", "normals", "semantic_segmentation"],
+    #     # data_types = ["rgb"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         # 데이터 수집 시 파라미터와 동일하게 설정
+    #         focal_length=24.0,
+    #         focus_distance=400.0,
+    #         horizontal_aperture=20.954999923706055,
+    #         vertical_aperture=15.290800094604492,  # 이 값을 명시적으로 추가합니다.
+    #         clipping_range=(1.0, 1000000.0)      # Near/Far 값을 정확히 맞춰줍니다.
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(pos=(-0.5, 0.9, 1.9), rot=RIGHT_ROT_CON, convention="world"),
+    #     semantic_segmentation_mapping ={
+    #         "class:table": (140, 255, 25, 255),
+    #         "class:object": (140, 25, 255, 255),
+    #     }
+    # )
     
 
 
@@ -263,8 +260,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     cfg = RAY_CASTER_MARKER_CFG.replace(prim_path="/Visuals/CameraPointCloud")
     cfg.markers["hit"].radius = 0.002
     pc_markers = VisualizationMarkers(cfg)
-    cam_list: list[Camera, Camera, Camera] = [scene["front_camera"], scene["left_behind_camera"], scene["right_behind_camera"]]
-    # cam_list: list[Camera] = [scene["front_camera"]]
+    # cam_list: list[Camera, Camera, Camera] = [scene["front_camera"], scene["left_behind_camera"], scene["right_behind_camera"]]
+    cam_list: list[Camera] = [scene["front_camera"]]
     sim_dt = sim.get_physics_dt()
     sim_time = 0.0
     count = 0
