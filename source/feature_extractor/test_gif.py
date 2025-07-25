@@ -156,6 +156,7 @@ def main(args):
         points_tensor = points_tensor.transpose(2, 1) # (1, C, N)
         
         # 4. 모델 예측 수행
+        print(f"points_tensor shape : {points_tensor.shape}")
         seg_pred, _ = classifier(points_tensor) # (1, N, num_classes)
         pred_val = seg_pred.contiguous().cpu().data.numpy()
         pred_labels = np.argmax(pred_val, 2).squeeze() # (N,)

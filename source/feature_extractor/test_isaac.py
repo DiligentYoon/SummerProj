@@ -30,6 +30,13 @@ from isaaclab.app import AppLauncher
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
+parser.add_argument('--model', type=str, default='pointnet2', help='model name')
+parser.add_argument('--batch_size', type=int, default=8, help='Batch Size during testing')
+parser.add_argument('--gpu', type=str, default='0', help='GPU to use')
+parser.add_argument('--npoint', type=int, default=2400, help='Point Number')
+parser.add_argument('--log_dir', type=str, required=False, help='Experiment root directory')
+parser.add_argument('--model_path', type=str, required=False, help='Path to a pre-trained model (.pth file)')
+parser.add_argument('--gif_dir', type=str, default='gif_results', help='Directory to save visualization gifs')
 # parser.add_argument("--enable_cameras", type=bool, default=True)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -115,17 +122,17 @@ OBJECT_DIR = {
 }
 
 
-# --- 인수 파싱 (기존과 동일) ---
-def parse_args():
-    parser = argparse.ArgumentParser('Model')
-    parser.add_argument('--model', type=str, default='pointnet2', help='model name')
-    parser.add_argument('--batch_size', type=int, default=8, help='Batch Size during testing')
-    parser.add_argument('--gpu', type=str, default='0', help='GPU to use')
-    parser.add_argument('--npoint', type=int, default=2400, help='Point Number')
-    parser.add_argument('--log_dir', type=str, required=True, help='Experiment root directory')
-    parser.add_argument('--model_path', type=str, required=True, help='Path to a pre-trained model (.pth file)')
-    parser.add_argument('--gif_dir', type=str, default='gif_results', help='Directory to save visualization gifs')
-    return parser.parse_args()
+# # --- 인수 파싱 (기존과 동일) ---
+# def parse_args():
+#     parser = argparse.ArgumentParser('Model')
+#     parser.add_argument('--model', type=str, default='pointnet2', help='model name')
+#     parser.add_argument('--batch_size', type=int, default=8, help='Batch Size during testing')
+#     parser.add_argument('--gpu', type=str, default='0', help='GPU to use')
+#     parser.add_argument('--npoint', type=int, default=2400, help='Point Number')
+#     parser.add_argument('--log_dir', type=str, required=False, help='Experiment root directory')
+#     parser.add_argument('--model_path', type=str, required=False, help='Path to a pre-trained model (.pth file)')
+#     parser.add_argument('--gif_dir', type=str, default='gif_results', help='Directory to save visualization gifs')
+#     return parser.parse_args()
 
 
 
@@ -277,7 +284,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, arg
     """Run the simulator."""
     # Define simulation stepping
     cfg = RAY_CASTER_MARKER_CFG.replace(prim_path="/Visuals/CameraPointCloud")
-    cfg.markers["hit"].radius = 0.002
+    cfg.markers["hit"].radius = 0.004
     pc_markers = VisualizationMarkers(cfg)
     cam_list: list[Camera, Camera, Camera] = [scene["front_camera"], scene["left_behind_camera"], scene["right_behind_camera"]]
     # cam_list: list[Camera] = [scene["right_behind_camera"]]
@@ -299,14 +306,17 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, arg
             break
 
     # Model
-    '''MODEL LOADING'''
-    classifier = get_model(2).cuda()
-    checkpoint = torch.load(args.model_path)
+    print("[INFO]: Loading PointNet++ model...")
+    NUM_CLASSES = 2 # Assuming binary segmentation (object vs background)
+    classifier = get_model(NUM_CLASSES).cuda()
+    if not args_cli.model_path:
+        args_cli.model_path = os.path.join(os.getcwd(), "log/sem_seg/2025-07-25_12-52/checkpoints/model.pth")
+    checkpoint = torch.load(args_cli.model_path)
     classifier.load_state_dict(checkpoint['model_state_dict'])
     classifier.eval()
+    print(f"[INFO]: Loaded pre-trained model from {args_cli.model_path}")
 
     # Simulate physics
-    first = True
     while simulation_app.is_running():
         # Reset
         if count % 500 == 0:
@@ -374,26 +384,51 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, arg
                 
         if all_clouds:
             total_clouds = torch.cat(all_clouds, dim=0)
-            total_labels = torch.cat(all_labels, dim=0)
+            total_labels = torch.cat(all_labels, dim=0).unsqueeze(-1)
             total_normals = torch.cat(all_normals, dim=0)
         else:
             total_clouds = torch.empty((0, 3), device=sim.device)
-            total_labels = torch.empty((0,), dtype=torch.long, device=sim.device)
+            total_labels = torch.empty((0, 1), dtype=torch.long, device=sim.device)
             total_normals = torch.empty((0, 3), device=sim.device)
             
                 
         sampled_points, sampled_labels, sampled_normals = uniform_sampling_for_pointnet(total_clouds, total_labels, total_normals)
 
-        if total_clouds.shape[0] > 0:
-            pc_markers.visualize(translations=sampled_points)
+        # if total_clouds.shape[0] > 0:
+        #     pc_markers.visualize(translations=sampled_points)
         
-        with torch.no_grda():
+        with torch.no_grad():
             # (N, 4+3=7)
-            inputs = torch.cat([sampled_points, sampled_normals, sampled_labels], dim=-1)
+            inputs = torch.cat([sampled_points- torch.mean(sampled_points, dim=0), 
+                                sampled_normals, 
+                                sampled_labels], dim=-1)
             # (N, 7) -> (1, N, 7) -> (1, 7, N)
-            inputs = inputs.squeeze(0).transpose(2, 1)
+            inputs = inputs.unsqueeze(0).transpose(2, 1)
             outputs, _ = classifier(inputs)
             pred_labels = torch.argmax(outputs, 2).squeeze()
+
+            num_gt_obj = torch.sum(sampled_labels == 1)
+            num_gt_bg = torch.sum(sampled_labels == 0)
+
+            correct_obj = torch.sum((pred_labels == 1) & (sampled_labels[:, 0] == 1))
+            correct_bg = torch.sum((pred_labels == 0) & (sampled_labels[:, 0] == 0))
+
+            accuracy = torch.sum(pred_labels == sampled_labels[:, 0]) / len(sampled_labels)
+            obj_accuracy = correct_obj / num_gt_obj if num_gt_obj > 0 else 0.0
+            bg_accuracy = correct_bg / num_gt_bg if num_gt_bg > 0 else 0.0
+
+            
+
+        print("-" * 40)
+        print(f" Total Accuracy : {accuracy}")
+        print(f" Object Accuracy : {obj_accuracy}")
+        print(f" Table Accuracy : {bg_accuracy}")
+        print("-" * 40)
+        print("\n")
+        
+        obj_pred = sampled_points[pred_labels == 1, ...]
+        if obj_pred.shape[0] > 0:
+            pc_markers.visualize(translations=obj_pred)
 
 
 def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor, object_id: str, table_id: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -435,6 +470,7 @@ def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
         if len(obj_ids) >= num_obj: # 포인트가 충분하면 비복원 추출
             sampled_obj_ids = obj_ids[torch.randperm(len(obj_ids))[:num_obj]]
         else: # 포인트가 부족하면 복원 추출로 개수를 맞춤
+            print(f"Upsampling !")
             indices_to_sample = torch.randint(0, len(obj_ids), (num_obj,), device=pointcloud.device)
             sampled_obj_ids = obj_ids[indices_to_sample]
 
@@ -443,6 +479,7 @@ def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
         if len(bg_ids) >= num_bg: # 포인트가 충분하면 비복원 추출
             sampled_bg_ids = bg_ids[torch.randperm(len(bg_ids))[:num_bg]]
         else: # 포인트가 부족하면 복원 추출
+            print(f"Upsampling !")
             indices_to_sample = torch.randint(0, len(bg_ids), (num_bg,), device=pointcloud.device)
             sampled_bg_ids = bg_ids[indices_to_sample]
 
@@ -485,7 +522,6 @@ def main():
     """Main function."""
 
     # Initialize the simulation context
-    args = parse_args()
     sim_cfg = sim_utils.SimulationCfg(dt=0.1, device=args_cli.device)
     sim = sim_utils.SimulationContext(sim_cfg)
     # Set main camera
@@ -498,7 +534,7 @@ def main():
     # Now we are ready!
     print("[INFO]: Setup complete...")
     # Run the simulator
-    run_simulator(sim, scene, args)
+    run_simulator(sim, scene, args_cli)
 
 
 if __name__ == "__main__":
