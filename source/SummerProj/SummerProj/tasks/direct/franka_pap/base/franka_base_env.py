@@ -86,7 +86,7 @@ class FrankaBaseEnv(DirectRLEnv):
 
         spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=(0.0, 0.0, -1.05))
         spawn = self.cfg.table.spawn
-        spawn.func(self.cfg.table.prim_path, spawn, translation=(0.5, 0.0, 0.0), orientation=(0.707, 0.0, 0.0, 0.707))
+        spawn.func(self.cfg.table.prim_path, spawn, translation=(0.0, 0.0, 0.0), orientation=(1.0, 0.0, 0.0, 0.0))
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
 

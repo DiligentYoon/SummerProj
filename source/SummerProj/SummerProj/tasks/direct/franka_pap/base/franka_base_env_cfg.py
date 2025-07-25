@@ -105,16 +105,23 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     # Table
     table = AssetBaseCfg(
         prim_path="/World/envs/env_.*/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.5, 0, 0.0], rot=[0.707, 0, 0, 0.707]),
-        spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0]),
+        spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd",
+                                   scale=(1.5, 2.0, 1.0)),
     )
+
+    # # 추후 Table
+    # table = AssetBaseCfg(
+    #     prim_path="/World/envs/env_.*/Table",
+    #     init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0]),
+    # )
 
     # events
     # events: EventCfg = EventCfg()
     
     # Joint Impedance controller
     imp_controller: JointImpedanceControllerCfg = JointImpedanceControllerCfg(
-        command_type="p_rel",
+        command_type="p_abs",
         impedance_mode="variable",
         stiffness=300.0,
         damping_ratio=0.5,
