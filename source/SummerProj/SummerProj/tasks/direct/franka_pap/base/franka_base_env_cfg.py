@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import DirectRLEnvCfg
@@ -20,6 +22,18 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
 from isaaclab.controllers import DifferentialIKControllerCfg
 from isaaclab.controllers.joint_impedance import JointImpedanceControllerCfg
 
+
+OBJECT_DIR = {
+    "table":{
+        "url": "/table.usd"
+    },
+
+    "stand": {
+        "url": "/stand.usd"
+    }
+}
+
+
 @configclass
 class FrankaBaseEnvCfg(DirectRLEnvCfg):
     # env
@@ -28,6 +42,18 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     action_space: int
     observation_space: int
     state_space: int
+
+    # ground plane
+    plane = AssetBaseCfg(
+        prim_path="/World/GroundPlane",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.612]),
+        spawn=GroundPlaneCfg(),
+    )
+
+    # light
+    dome_light = AssetBaseCfg(
+        prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+    )
 
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=3.0, replicate_physics=True)
 
@@ -41,7 +67,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
             max_depenetration_velocity=5.0),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True, solver_position_iteration_count=12, solver_velocity_iteration_count=0),
-        # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
+        collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 0.0),
@@ -62,24 +88,6 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     robot.actuators["panda_shoulder"].damping = 0.0
     robot.actuators["panda_forearm"].stiffness = 0.0
     robot.actuators["panda_forearm"].damping = 0.0
-
-    # ground plane
-    plane = AssetBaseCfg(
-        prim_path="/World/GroundPlane",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -1.05]),
-        spawn=GroundPlaneCfg(),
-    )
-    
-    # goal object marker
-    goal_object_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
-        prim_path="/Visuals/goal_object",
-        markers={
-            "goal": sim_utils.UsdFileCfg(
-                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
-                scale=(1.0, 1.0, 1.0),
-            )
-        },
-    )
 
     goal_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
         prim_path="Visuals/goal_marker",
@@ -102,22 +110,25 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
         }
     )
 
+    # stand
+    stand = AssetBaseCfg(
+        prim_path="/World/envs/env_.*/stand",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0.0]),
+        spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["stand"]["url"],
+                                   scale=(1.2, 1.2, 1.2),
+                                   ),
+    )
+
     # Table
     table = AssetBaseCfg(
         prim_path="/World/envs/env_.*/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0]),
-        spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/ThorlabsTable/table_instanceable.usd",
-                                   scale=(1.5, 2.0, 1.0)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.67, 0.0, -0.3], rot=[1.0, 0, 0, 0.0]),
+        spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["table"]["url"],
+                                   collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+                                   scale=(0.7, 1.0, 0.6),
+                                   semantic_tags=[("class", "table")]
+                                   ),
     )
-
-    # # 추후 Table
-    # table = AssetBaseCfg(
-    #     prim_path="/World/envs/env_.*/Table",
-    #     init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0]),
-    # )
-
-    # events
-    # events: EventCfg = EventCfg()
     
     # Joint Impedance controller
     imp_controller: JointImpedanceControllerCfg = JointImpedanceControllerCfg(

@@ -27,7 +27,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self._robot_entity.resolve(self.scene)
         self.processed_actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self.imp_commands = torch.zeros((self.num_envs, self.imp_controller.num_actions), device=self.device)
-        self.ik_commands = torch.zeros((self.num_envs, self.ik_controller.action_dim), device=self.device)
         self.des_joint_angle = torch.zeros((self.num_envs, self.num_active_joints), device=self.device)
 
         # Parameter for IK Controller
@@ -72,7 +71,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
     # ================= IK + Controller Gain =================
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         """
-        actions.shape  =  (N, 20)
+        actions.shape  =  (N, 21)
         0:7      →  Delta Joint angle for Impedance Control (rad)
         7:14     →  Joint-stiffness for Impedance Control   (N·m/rad)
         14:21    →  Damping-ratio for Impedance Control     (-)
@@ -88,7 +87,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.processed_actions[:, 14:] = torch.clamp(self.actions[:, 14:] * self.cfg.damping_scale,
                                                      self.robot_dof_damping_lower_limits,
                                                      self.robot_dof_damping_upper_limits) 
-        # self.processed_actions[:, 20] = torch.where(self.actions[:, 20] < 0, self.finger_close_joint_pos, self.finger_open_joint_pos)
         
         # ===== Impedance Controller Parameter 세팅 =====
         self.imp_commands[:, :self.num_active_joints] = self.processed_actions[:, :7] + self._robot.data.joint_pos[:, :7]
@@ -129,9 +127,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #     joint_pos_des = robot_joint_pos.clone()
     
         # ======== Joint Impedance Regulator ========
-        # res_joint_pos = self.des_joint_angle - robot_joint_pos
-        # res_joint_pos = torch.zeros((self.num_envs, 7), device=self.device)
-        # self.imp_commands[:, :self.num_active_joints] = res_joint_pos
         des_torque = self.imp_controller.compute(dof_pos=robot_joint_pos,
                                                  dof_vel=robot_joint_vel,
                                                  mass_matrix=gen_mass,
@@ -147,52 +142,53 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        self.is_reach = torch.logical_and(self.loc_error < 1e-2, self.rot_error < 1e-1)
+        # self.is_reach = torch.logical_and(self.loc_error < 1e-2, self.rot_error < 1e-1)
         truncated = self.episode_length_buf >= self.max_episode_length - 1
-        terminated = self.is_reach
+        terminated = truncated
         return terminated, truncated
         
     def _get_rewards(self):
         # Action Penalty
-        action_norm = torch.norm(self.actions[:, 7:14], dim=1)
+        # action_norm = torch.norm(self.actions[:, 7:14], dim=1)
 
-        # =========== Approach Reward (1): Potential Based Reward Shaping =============
+        # # =========== Approach Reward (1): Potential Based Reward Shaping =============
+        # # gamma = 1.0
+        # # phi_s_prime = -self.loc_error
+        # # phi_s = -self.prev_loc_error
+
+        # # phi_s_prime_rot = -self.rot_error
+        # # phi_s_rot = -self.prev_rot_error
+
+        # # r_pos = gamma*phi_s_prime - phi_s 
+        # # r_rot = gamma*phi_s_prime_rot - phi_s_rot
+
+        # # =========== Approach Reward (1-1): Potential Based Reward Shaping by log scale =============
         # gamma = 1.0
-        # phi_s_prime = -self.loc_error
-        # phi_s = -self.prev_loc_error
+        # phi_s_prime = -torch.log(self.cfg.alpha * self.loc_error + 1)
+        # phi_s = -torch.log(self.cfg.alpha * self.prev_loc_error + 1)
 
-        # phi_s_prime_rot = -self.rot_error
-        # phi_s_rot = -self.prev_rot_error
+        # phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
+        # phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
 
         # r_pos = gamma*phi_s_prime - phi_s 
         # r_rot = gamma*phi_s_prime_rot - phi_s_rot
 
-        # =========== Approach Reward (1-1): Potential Based Reward Shaping by log scale =============
-        gamma = 1.0
-        phi_s_prime = -torch.log(self.cfg.alpha * self.loc_error + 1)
-        phi_s = -torch.log(self.cfg.alpha * self.prev_loc_error + 1)
+        # # =========== Success Reward : Goal Reach ============
+        # r_success = self.is_reach.float()
 
-        phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
-        phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
-
-        r_pos = gamma*phi_s_prime - phi_s 
-        r_rot = gamma*phi_s_prime_rot - phi_s_rot
-
-        # =========== Success Reward : Goal Reach ============
-        r_success = self.is_reach.float()
-
-        # =========== Contact Penalty =================
-        p_contact = torch.norm(self._object.data.root_vel_w, dim=1)
+        # # =========== Contact Penalty =================
+        # p_contact = torch.norm(self._object.data.root_vel_w, dim=1)
         
-        # =========== Summation =============
-        reward = self.cfg.w_pos * r_pos + \
-                 self.cfg.w_rot * r_rot - \
-                 self.cfg.w_penalty * action_norm - \
-                 self.cfg.w_contact * p_contact + \
-                 self.cfg.w_success * r_success
+        # # =========== Summation =============
+        # reward = self.cfg.w_pos * r_pos + \
+        #          self.cfg.w_rot * r_rot - \
+        #          self.cfg.w_penalty * action_norm - \
+        #          self.cfg.w_contact * p_contact + \
+        #          self.cfg.w_success * r_success
 
-        # print(f"reward of env1 : {reward[0]}")
-        # print(f"--------------------------------------")
+        # # print(f"reward of env1 : {reward[0]}")
+        # # print(f"--------------------------------------")
+        reward = -1 * torch.ones((self.num_envs, 1), device=self.device)
 
         return reward
     
@@ -232,7 +228,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
             env_ids = self._robot._ALL_INDICES
         # ============ Robot State & Scene 리셋 ===============
         super()._reset_idx(env_ids)
-        self.ik_controller.reset(env_ids)
 
         # ============ Target Point 리셋 ===============
         # object(=target point) reset : Location
@@ -299,8 +294,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], self.goal_pos_b[env_ids, 3:7])
         
         # ======== Visualization ==========
-        self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
+        # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
+        # self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:

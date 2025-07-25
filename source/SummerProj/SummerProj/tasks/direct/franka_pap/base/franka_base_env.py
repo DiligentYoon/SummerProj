@@ -84,15 +84,15 @@ class FrankaBaseEnv(DirectRLEnv):
         self._robot = Articulation(self.cfg.robot)
         self.scene.articulations["robot"] = self._robot
 
-        spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=(0.0, 0.0, -1.05))
+        # Ground와 Table은 따로 확실하게 Spawn
+        spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=self.cfg.plane.init_state.pos)
         spawn = self.cfg.table.spawn
-        spawn.func(self.cfg.table.prim_path, spawn, translation=(0.0, 0.0, 0.0), orientation=(1.0, 0.0, 0.0, 0.0))
+        spawn.func(self.cfg.table.prim_path, spawn, translation=self.cfg.table.init_state.pos, orientation=(1.0, 0.0, 0.0, 0.0))
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
 
         # add lights
-        light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
-        light_cfg.func("/World/Light", light_cfg)
+        self.cfg.dome_light.spawn.func(self.cfg.dome_light.prim_path, self.cfg.dome_light)
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):

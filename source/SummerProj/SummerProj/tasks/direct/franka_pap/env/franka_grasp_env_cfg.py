@@ -53,6 +53,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
                     max_depenetration_velocity=5.0,
                     disable_gravity=False,
                 ),
+                semantic_tags=[("class", "object")]
             ),
         )
     
