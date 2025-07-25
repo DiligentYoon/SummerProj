@@ -46,7 +46,7 @@ print("-" * 20)
 
 
 def verify_and_visualize_dataset(save_gif=True, gif_name="merged_dataset.gif"):
-    base_dir = os.path.join(os.getcwd(), "Dataset")
+    base_dir = os.path.join(os.getcwd(), "Dataset", "cylinder_2")
     
     # ---------- 1. 데이터 로드 및 병합 ----------
     cam_dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and d.startswith("Cam")]

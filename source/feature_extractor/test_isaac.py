@@ -23,6 +23,8 @@ We add the following sensors on the quadruped robot, ANYmal-C (ANYbotics):
 
 import argparse
 import os
+
+import torch.random
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
@@ -41,6 +43,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import torch
+import importlib
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
@@ -54,6 +57,8 @@ from isaaclab_assets.robots.franka import FRANKA_PANDA_CFG
 from isaaclab.utils import configclass
 from isaaclab.sensors.camera.utils import create_pointcloud_from_depth, convert_to_torch
 from isaaclab.utils.math import quat_mul, unproject_depth, transform_points
+
+from model.pointnet2 import get_model
 
 FRONT_ROT = (0.65004, 0.26831, 0.26532, 0.65959)
 LEFT_ROT = (0.8966, 0.3504, -0.0986, -0.2523)
@@ -108,6 +113,21 @@ OBJECT_DIR = {
         "url": "/stand.usd"
     }
 }
+
+
+# --- 인수 파싱 (기존과 동일) ---
+def parse_args():
+    parser = argparse.ArgumentParser('Model')
+    parser.add_argument('--model', type=str, default='pointnet2', help='model name')
+    parser.add_argument('--batch_size', type=int, default=8, help='Batch Size during testing')
+    parser.add_argument('--gpu', type=str, default='0', help='GPU to use')
+    parser.add_argument('--npoint', type=int, default=2400, help='Point Number')
+    parser.add_argument('--log_dir', type=str, required=True, help='Experiment root directory')
+    parser.add_argument('--model_path', type=str, required=True, help='Path to a pre-trained model (.pth file)')
+    parser.add_argument('--gif_dir', type=str, default='gif_results', help='Directory to save visualization gifs')
+    return parser.parse_args()
+
+
 
 @configclass
 class SensorsSceneCfg(InteractiveSceneCfg):
@@ -253,7 +273,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
 
 
 
-def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
+def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, args):
     """Run the simulator."""
     # Define simulation stepping
     cfg = RAY_CASTER_MARKER_CFG.replace(prim_path="/Visuals/CameraPointCloud")
@@ -264,6 +284,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     sim_dt = sim.get_physics_dt()
     sim_time = 0.0
     count = 0
+
+    # Model
+    '''MODEL LOADING'''
+    classifier = get_model(2).cuda()
+    checkpoint = torch.load(args.model_path)
+    classifier.load_state_dict(checkpoint['model_state_dict'])
 
     # Simulate physics
     first = True
@@ -279,12 +305,18 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             scene.reset()
 
             # Object ID 미리 뽑아두기.
+            table_id = None
             object_id = None
             semantic_info = cam_list[0].data.info[0]["semantic_segmentation"]["idToLabels"]
             for key, value in semantic_info.items():
                 if value.get('class') == 'object':
                     object_id = key  
-                    break      
+                elif value.get('class') == 'table':
+                    table_id = key
+
+                if object_id is not None and table_id is not None:
+                    break
+
 
             print("[INFO]: Resetting robot state...")
 
@@ -327,11 +359,14 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             )
 
             #  4. Validation Mask : (H * W, 1)
-            valid_mask = extract_valid_mask(pointcloud, semantic_labels, object_id)
+            valid_mask, mapped_labels = extract_valid_mask(pointcloud, semantic_labels, object_id, table_id)
             if valid_mask is not None:
                 valid_cloud = pointcloud[valid_mask, ...]
-                valid_label = semantic_labels[valid_mask, ...]
+                valid_label = mapped_labels[valid_mask, ...]
                 valid_normal = normal_directions[valid_mask, ...]
+
+                if torch.sum(valid_label) != torch.sum(mapped_labels):
+                    print(f"분류 오류")
                 
                 if total_clouds is None:
                     total_clouds = valid_cloud
@@ -341,58 +376,25 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     total_clouds = torch.concat((total_clouds, valid_cloud), dim=0)
                     total_labels = torch.concat((total_labels, valid_label), dim=0)
                     total_normals = torch.concat((total_normals, valid_normal), dim=0)
+            
+            print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
+            
                 
-                print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
-        
+        sampled_points, sampled_labels, sampled_normals = uniform_sampling_for_pointnet(total_clouds, total_labels, total_normals)
+
         # # print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
         if total_clouds.shape[0] > 0:
-            pc_markers.visualize(translations=total_clouds)
+            pc_markers.visualize(translations=sampled_points)
         # pc_markers.visualize(translations=pointcloud)
         # print("-" * 40)
         # print("\n\n")
 
 
-def convert_rgba_to_id(rgba_image: torch.Tensor, color_map: list[tuple[int, int, int, int]]) -> torch.Tensor:
-    """
-    (H, W, 4) RGBA 시맨틱 이미지를 (H * W) ID 텐서로 효율적으로 변환합니다.
-    이 함수는 for 루프 대신 벡터화된 연산을 사용하여 매우 빠릅니다.
-
-    Args:
-        rgba_image (torch.Tensor): (H, W, 4) 형상의 RGBA 이미지. torch.uint8 타입.
-        color_map (list[tuple[int, int, int, int]]): 클래스 ID를 인덱스로 하는 색상(RGBA) 리스트.
-
-    Returns:
-        torch.Tensor: (H * W) 형상의 1D 정수 ID 텐서.
-    """
-    height, width, _ = rgba_image.shape
-    device = rgba_image.device
-
-    # 컬러맵을 (C, 4) 텐서로 변환 (C는 클래스 수)
-    colors_tensor = torch.tensor(color_map, dtype=torch.uint8, device=device)
-
-    # (H, W, 4) 이미지를 (H, W, 1, 4)로 차원 확장
-    # (H, W, 1, 4)와 (C, 4)를 브로드캐스팅하여 비교 -> 결과는 (H, W, C, 4)
-    comparison = (rgba_image.unsqueeze(2) == colors_tensor)
-
-    # 마지막 채널(RGBA) 차원에 대해 모두 일치하는지 확인 -> 결과는 (H, W, C)
-    mask = torch.all(comparison, dim=-1)
-
-    # 각 픽셀에 대해 True인 첫 번째 클래스 ID를 찾음 (C 차원에서 argmax)
-    # .long()을 통해 boolean 텐서를 0과 1로 변환
-    id_map = torch.argmax(mask.long(), dim=-1)
-
-    # (H, W) -> (H * W)로 평탄화하여 반환
-    return id_map.flatten()
-
-# 사용 예시
-# semantic_labels = convert_rgba_to_id_vectorized(rgba_image_tensor, RGBA_MAP)
-
-
-def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor, object_id: str) -> torch.Tensor:
+def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor, object_id: str, table_id: str) -> tuple[torch.Tensor, torch.Tensor]:
     """
     유효한 포인트 클라우드 마스크를 추출합니다.
     1. 포인트 좌표에 NaN이나 Inf가 없어야 합니다.
-    2. 레이블이 1(Table) 또는 2(Object)여야 합니다.
+    2. 레이블이 Table 또는 Object여야 합니다.
     """
     # 1. torch.isfinite()를 사용하여 NaN과 Inf를 한 번에 효율적으로 확인합니다.
     #    pointcloud의 모든 좌표(x, y, z)가 유한한 수인지 검사합니다.
@@ -400,14 +402,35 @@ def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor, object_id:
 
     # 2. 불필요한 텐서 생성을 제거하고 간결하게 비교합니다.
     #    '|' 연산자는 tensor에서 torch.logical_or와 동일하게 작동합니다.
-    # label_valid = (flat_labels == 2) | (flat_labels == 3)
-    if object_id is not None:
-        label_valid = label == int(object_id)
+    mapped_labels = torch.zeros_like(label, dtype=label.dtype, device=label.device)
+    if object_id is not None and table_id is not None:
+        object_label_mask = (label == int(object_id))
+        table_label_mask = (label == int(table_id))
+        mapped_labels[object_label_mask] = 1
+        valid_mask = (label == int(object_id)) | (label == int(table_id))
     else:
-        label_valid = None
+        valid_mask = None
     
-    # 3. 두 마스크를 AND 연산하여 최종 결과를 반환합니다.
-    return label_valid
+    return valid_mask, mapped_labels
+
+
+def uniform_sampling_for_pointnet(pointcloud: torch.Tensor, 
+                                  label: torch.Tensor, 
+                                  normals: torch.Tensor,
+                                  num_obj=800, num_bg = 1600) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+    # label 기반으로 obj, bg index 분류 -> index 자체 샘플링후 매핑
+    obj_ids = torch.where(label==1)[0]
+    bg_ids = torch.where(label!=1)[0]
+
+    sampled_obj_ids = obj_ids[torch.randperm(len(obj_ids))[:num_obj]]
+    sampled_bg_ids = bg_ids[torch.randperm(len(bg_ids))[:num_bg]]
+
+    cat_sampled_ids = torch.cat((sampled_obj_ids, sampled_bg_ids))
+
+    sampled_ids = cat_sampled_ids[torch.randperm(len(cat_sampled_ids))]
+
+    return pointcloud[sampled_ids, ...], label[sampled_ids, ...], normals[sampled_ids, ...]
 
 
 
@@ -416,6 +439,7 @@ def main():
     """Main function."""
 
     # Initialize the simulation context
+    args = parse_args()
     sim_cfg = sim_utils.SimulationCfg(dt=0.1, device=args_cli.device)
     sim = sim_utils.SimulationContext(sim_cfg)
     # Set main camera
@@ -428,7 +452,7 @@ def main():
     # Now we are ready!
     print("[INFO]: Setup complete...")
     # Run the simulator
-    run_simulator(sim, scene)
+    run_simulator(sim, scene, args)
 
 
 if __name__ == "__main__":

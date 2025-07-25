@@ -46,7 +46,7 @@ ID_TO_INDEX_MAP = {
 
 OBJECT_LIST = ["mug_1", "mug_2", "cube_1", "cube_2", "cylinder_1", "cylinder_2"]
 
-PLOT_MODE = True
+PLOT_MODE = False
 
 print("\n")
 print("-" * 20)
@@ -80,7 +80,7 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
         return
     merged_points = np.vstack(all_points)
     merged_labels = np.concatenate(all_labels)
-    merged_normals = np.vstack(all_normals)
+    merged_normals = np.vstack(all_normals)[:, :3]
     # merged_colors = np.vstack(all_colors)
 
     # ---------- 2. 데이터 전처리 ----------
@@ -106,16 +106,26 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
         bg_points_ds, bg_labels_ds, bg_normals_ds = np.zeros((N_BG, 3)), np.zeros(N_BG), np.zeros((N_BG, 4))
 
     pos = np.vstack((obj_points_ds, bg_points_ds)).astype(np.float32)
-    pos_normalized = pos - np.mean(pos, axis=0)
     y = np.concatenate((obj_labels_ds, bg_labels_ds)).astype(np.int64)
     normals = np.vstack((obj_normals_ds, bg_normals_ds)).astype(np.float32)
+    seg_mask = np.vstack((np.ones((N_OBJ, 1)), np.zeros((N_BG, 1)))).astype(np.float32)
+
+    total_points = N_OBJ + N_BG
+    shuffled_indices = np.arange(total_points)
+    np.random.shuffle(shuffled_indices)
+
+    pos_shuffled = pos[shuffled_indices]
+    pos_normalized = pos_shuffled - np.mean(pos_shuffled, axis=0) # 정규화는 섞인 데이터로 수행
+    y = y[shuffled_indices] # 최종 y (시각화 및 저장에 사용)
+    normals = normals[shuffled_indices]
+    seg_mask = seg_mask[shuffled_indices]
+
     # 0으로 채워진 새로운 라벨 배열을 생성합니다 (기본값: 배경).
     y_indexed = np.zeros_like(y, dtype=np.int64)
 
     for id_32bit, index in ID_TO_INDEX_MAP.items():
         y_indexed[y == id_32bit] = index
-
-    seg_mask = np.vstack((np.ones((N_OBJ, 1)), np.zeros((N_BG, 1)))).astype(np.float32)
+        
     x = np.hstack((normals, seg_mask)) # HACMan++에서는 색상 제외
 
     # ---------- 3. 데이터 저장 ----------
@@ -187,124 +197,123 @@ def prepare_and_visualize_scene(base_dir: str, output_dir: str, test_dir: str, f
 
 
 # =========================================
-
-
-def prepare_scene_for_pointnet(base_dir: str, output_dir: str, frame_id: int):
-    """
-        한 프레임의 다중 뷰 데이터를 병합하고 전처리하여
-        PointNet++ 학습용 샘플 파일(.npz)을 생성합니다.
+# def prepare_scene_for_pointnet(base_dir: str, output_dir: str, frame_id: int):
+#     """
+#         한 프레임의 다중 뷰 데이터를 병합하고 전처리하여
+#         PointNet++ 학습용 샘플 파일(.npz)을 생성합니다.
         
-        num_points: 네트워크에 입력하기 전, 씬을 대표하는 포인트 수 (pre-sampling)
-    """
+#         num_points: 네트워크에 입력하기 전, 씬을 대표하는 포인트 수 (pre-sampling)
+#     """
     
-    # ---------- 1. 데이터 로드 및 병합 (RGB 로딩 추가) ----------
-    cam_dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and d.startswith("Cam")]
-    cam_dirs.sort()
-    if not cam_dirs: return
+#     # ---------- 1. 데이터 로드 및 병합 (RGB 로딩 추가) ----------
+#     cam_dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and d.startswith("Cam")]
+#     cam_dirs.sort()
+#     if not cam_dirs: return
 
-    all_points, all_labels, all_colors = [], [], []
+#     all_points, all_labels, all_colors = [], [], []
 
-    frame_str = f"{frame_id:04d}"
-    print(f"--- 프레임 {frame_str} 처리 시작 ---")
+#     frame_str = f"{frame_id:04d}"
+#     print(f"--- 프레임 {frame_str} 처리 시작 ---")
 
-    for cam_dir in cam_dirs:
-        cam_path = os.path.join(base_dir, cam_dir)
-        try:
-            npy_filepath = os.path.join(cam_path, "pointcloud", f"pointcloud_{frame_str}.npy")
-            labels_filepath = os.path.join(cam_path, "pointcloud", f"pointcloud_semantic_{frame_str}.npy")
-            rgb_filepath = os.path.join(cam_path, "pointcloud", f"pointcloud_rgb_{frame_str}.npy")
+#     for cam_dir in cam_dirs:
+#         cam_path = os.path.join(base_dir, cam_dir)
+#         try:
+#             npy_filepath = os.path.join(cam_path, "pointcloud", f"pointcloud_{frame_str}.npy")
+#             labels_filepath = os.path.join(cam_path, "pointcloud", f"pointcloud_semantic_{frame_str}.npy")
+#             rgb_filepath = os.path.join(cam_path, "pointcloud", f"pointcloud_rgb_{frame_str}.npy")
 
-            xyz_data = np.load(npy_filepath)
-            labels_part = np.load(labels_filepath)
-            rgb_data = np.load(rgb_filepath)
+#             xyz_data = np.load(npy_filepath)
+#             labels_part = np.load(labels_filepath)
+#             rgb_data = np.load(rgb_filepath)
 
-            if xyz_data.size > 0:
-                all_points.append(xyz_data)
-                all_labels.append(labels_part)
-                all_colors.append(rgb_data)
-        except FileNotFoundError:
-            continue
+#             if xyz_data.size > 0:
+#                 all_points.append(xyz_data)
+#                 all_labels.append(labels_part)
+#                 all_colors.append(rgb_data)
+#         except FileNotFoundError:
+#             continue
     
-    if not all_points:
-        print(f"프레임 {frame_str}에 대한 데이터를 찾을 수 없습니다.")
-        return
+#     if not all_points:
+#         print(f"프레임 {frame_str}에 대한 데이터를 찾을 수 없습니다.")
+#         return
 
-    merged_points = np.vstack(all_points)
-    merged_labels = np.concatenate(all_labels)
-    merged_colors = np.vstack(all_colors)
+#     merged_points = np.vstack(all_points)
+#     merged_labels = np.concatenate(all_labels)
+#     merged_colors = np.vstack(all_colors)
 
-    # ---------- 2. 데이터 전처리 (HACMan++ 방식) ----------
+#     # ---------- 2. 데이터 전처리 (HACMan++ 방식) ----------
     
-    # a. 오브젝트 / 배경 분리
-    # 배경 ID에 속하지 않는 모든 포인트를 오브젝트로 간주합니다.
-    # np.isin을 사용하여 merged_labels의 각 요소가 BACKGROUND_IDS에 포함되는지 확인합니다.
-    object_mask = np.isin(merged_labels, OBJECT_IDS)
-    background_mask = ~object_mask
+#     # a. 오브젝트 / 배경 분리
+#     # 배경 ID에 속하지 않는 모든 포인트를 오브젝트로 간주합니다.
+#     # np.isin을 사용하여 merged_labels의 각 요소가 BACKGROUND_IDS에 포함되는지 확인합니다.
+#     object_mask = np.isin(merged_labels, OBJECT_IDS)
+#     background_mask = ~object_mask
 
-    object_points = merged_points[object_mask]
-    object_colors = merged_colors[object_mask]
-    object_labels = merged_labels[object_mask]
+#     object_points = merged_points[object_mask]
+#     object_colors = merged_colors[object_mask]
+#     object_labels = merged_labels[object_mask]
 
-    background_points = merged_points[background_mask]
-    background_colors = merged_colors[background_mask]
-    background_labels = merged_labels[background_mask]
+#     background_points = merged_points[background_mask]
+#     background_colors = merged_colors[background_mask]
+#     background_labels = merged_labels[background_mask]
 
-    print(f"분리 결과 - 오브젝트: {len(object_points)}개, 배경: {len(background_points)}개")
+#     print(f"분리 결과 - 오브젝트: {len(object_points)}개, 배경: {len(background_points)}개")
 
-    # 오브젝트 샘플링
-    if len(object_points) > 0:
-        obj_indices = np.random.choice(len(object_points), N_OBJ, replace=len(object_points) < N_OBJ)
-        obj_points_ds = object_points[obj_indices]
-        obj_colors_ds = object_colors[obj_indices]
-        obj_labels_ds = object_labels[obj_indices]
-    else: # 씬에 오브젝트가 없는 경우
-        obj_points_ds = np.zeros((N_OBJ, 3))
-        obj_colors_ds = np.zeros((N_OBJ, 3))
-        obj_labels_ds = np.zeros(N_OBJ)
+#     # 오브젝트 샘플링
+#     if len(object_points) > 0:
+#         obj_indices = np.random.choice(len(object_points), N_OBJ, replace=len(object_points) < N_OBJ)
+#         obj_points_ds = object_points[obj_indices]
+#         obj_colors_ds = object_colors[obj_indices]
+#         obj_labels_ds = object_labels[obj_indices]
+#     else: # 씬에 오브젝트가 없는 경우
+#         obj_points_ds = np.zeros((N_OBJ, 3))
+#         obj_colors_ds = np.zeros((N_OBJ, 3))
+#         obj_labels_ds = np.zeros(N_OBJ)
 
-    # 배경 샘플링
-    if len(background_points) > 0:
-        bg_indices = np.random.choice(len(background_points), N_BG, replace=len(background_points) < N_BG)
-        bg_points_ds = background_points[bg_indices]
-        bg_colors_ds = background_colors[bg_indices]
-        bg_labels_ds = background_labels[bg_indices]
-    else: # 씬에 배경이 없는 경우
-        bg_points_ds = np.zeros((N_BG, 3))
-        bg_colors_ds = np.zeros((N_BG, 3))
-        bg_labels_ds = np.zeros(N_BG)
+#     # 배경 샘플링
+#     if len(background_points) > 0:
+#         bg_indices = np.random.choice(len(background_points), N_BG, replace=len(background_points) < N_BG)
+#         bg_points_ds = background_points[bg_indices]
+#         bg_colors_ds = background_colors[bg_indices]
+#         bg_labels_ds = background_labels[bg_indices]
+#     else: # 씬에 배경이 없는 경우
+#         bg_points_ds = np.zeros((N_BG, 3))
+#         bg_colors_ds = np.zeros((N_BG, 3))
+#         bg_labels_ds = np.zeros(N_BG)
 
-    # c. 최종 데이터 통합
-    #   - 위치(pos): 오브젝트 포인트와 배경 포인트를 합침
-    pos = np.vstack((obj_points_ds, bg_points_ds)).astype(np.float32)
+#     # 최종 데이터 통합 및 셔플링
+#     #   - 위치(pos): 오브젝트 포인트와 배경 포인트를 합침
+#     pos = np.vstack((obj_points_ds, bg_points_ds)).astype(np.float32)
+#     #   - 라벨(y): 오브젝트 라벨과 배경 라벨을 합침
+#     y = np.concatenate((obj_labels_ds, bg_labels_ds)).astype(np.int64)
+
+
+
+#     # d. 최종 특징(x) 생성 및 정규화
+#     #   - 색상(RGB)
+#     colors_combined = np.vstack((obj_colors_ds, bg_colors_ds))
+#     colors_normalized = (colors_combined / 255.0).astype(np.float32)
+
+#     #   - 위치(pos) 정규화
+#     pos_normalized = pos - np.mean(pos, axis=0)
     
-    #   - 라벨(y): 오브젝트 라벨과 배경 라벨을 합침
-    y = np.concatenate((obj_labels_ds, bg_labels_ds)).astype(np.int64)
+#     #   - 최종 특징(x) = 분할 마스크
+#     x = np.vstack((
+#         np.ones((N_OBJ, 1)),  # 오브젝트는 1
+#         np.zeros((N_BG, 1))   # 배경은 0
+#     )).astype(np.float32)
 
-    # d. 최종 특징(x) 생성 및 정규화
-    #   - 색상(RGB)
-    colors_combined = np.vstack((obj_colors_ds, bg_colors_ds))
-    colors_normalized = (colors_combined / 255.0).astype(np.float32)
-
-    #   - 위치(pos) 정규화
-    pos_normalized = pos - np.mean(pos, axis=0)
+#     # ---------- 3. 데이터 저장 ----------
+#     os.makedirs(output_dir, exist_ok=True)
+#     output_filepath = os.path.join(output_dir, f"sample_{frame_str}.npz")
     
-    #   - 최종 특징(x) = 분할 마스크
-    x = np.vstack((
-        np.ones((N_OBJ, 1)),  # 오브젝트는 1
-        np.zeros((N_BG, 1))   # 배경은 0
-    )).astype(np.float32)
-
-    # ---------- 3. 데이터 저장 ----------
-    os.makedirs(output_dir, exist_ok=True)
-    output_filepath = os.path.join(output_dir, f"sample_{frame_str}.npz")
-    
-    np.savez(
-        output_filepath,
-        pos=pos_normalized,    # (1400, 3) - 위치
-        x=x,                   # (1400, 4) - 특징 (RGB + Mask)
-        y=y                    # (1400,)   - 시맨틱 라벨
-    )
-    print(f"[✓] 전처리 완료. 샘플 저장 → {output_filepath} (Pos: {pos.shape}, X: {x.shape})")
+#     np.savez(
+#         output_filepath,
+#         pos=pos_normalized,    # (2400, 3) - 위치
+#         x=x,                   # (2400, 4) - 특징 (RGB + Mask)
+#         y=y                    # (2400,)   - 시맨틱 라벨
+#     )
+#     print(f"[✓] 전처리 완료. 샘플 저장 → {output_filepath} (Pos: {pos.shape}, X: {x.shape})")
 
 
 if __name__ == "__main__":

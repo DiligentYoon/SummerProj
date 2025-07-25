@@ -14,9 +14,9 @@ config = {
         "renderer": "RayTracedLighting",
         "headless": True,
     },
-    "resolution": [1024, 1024],
+    "resolution": [480, 360],
     "rt_subframes": 24,
-    "num_frames": 1,
+    "num_frames": 200,
     "env_url": "/Isaac/Environments/Terrains/flat_plane.usd",
     "writer": "BasicWriter",
     "writer_config": {
@@ -28,7 +28,7 @@ config = {
     },
     "clear_previous_semantics": True,
 
-    "target_obj": "cylinder_2",
+    "target_obj": "cylinder_1",
 
     "mug_1": {
         "url": "/Isaac/Props/YCB/Axis_Aligned/025_mug.usd",
@@ -195,7 +195,7 @@ my_utils.register_lights_placement(pallet_prim)
 # ==================== 데이터셋 생성을 위한 Render Product 생성 ===================
 
 # Create render products for the custom cameras and attach them to the writer
-resolution = config.get("resolution", (1024, 1024))
+resolution = config.get("resolution", (480, 360))
 rp_1 = rep.create.render_product(cam_1, resolution, name="Cam1")
 rp_2 = rep.create.render_product(cam_2, resolution, name="Cam2")
 rp_3 = rep.create.render_product(cam_3, resolution, name="Cam3")
