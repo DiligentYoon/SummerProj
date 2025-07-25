@@ -8,16 +8,14 @@ from __future__ import annotations
 import torch
 from abc import abstractmethod
 
-import isaaclab.sim as sim_utils
-from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import TiledCamera
 from isaaclab.assets import RigidObject
 from isaaclab.utils.math import sample_uniform
 
-from .franka_base_env import FrankaBaseEnv
+from .franka_base_env_diol import FrankaBaseDIOLEnv
 from .franka_base_vision_cfg import FrankaVisionBaseCfg
 
-class FrankaVisionBaseEnv(FrankaBaseEnv):
+class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
     cfg: FrankaVisionBaseCfg
 
     def __init__(self, cfg: FrankaVisionBaseCfg, render_mode: str | None = None, **kwargs):
@@ -46,18 +44,28 @@ class FrankaVisionBaseEnv(FrankaBaseEnv):
             if value.get('class') == 'object':
                 self.table_id = int(key)
             
-            if self.table_id is not None and self.object_id is not None:
+            if (self.table_id is not None) and (self.object_id is not None):
                 break
         super()._setup_scene()
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):
-        # Robot 리셋
+        # Reset Robot 
         super()._reset_idx(env_ids)
-        # Camera 리셋
+        # Reset Camera 
         for cam in self.cam_list:
             cam.reset(env_ids)
-        # Object 리셋
+        # Reset Object : MultipleAsset 영향으로, 물체의 종류도 바뀌는 것을 기대
+        loc_noise_x = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
+        loc_noise_y = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
+        loc_noise_z = sample_uniform(0.0, 0.0, (len(env_ids), 1), device=self.device)
+        loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
+        # 난이도 고려, 회전 정보는 일단 그대로
+        default_obj_state = self._object.data.default_root_state[env_ids, :]
+        default_obj_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
+        # object 상태 업데이트
+        self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
+        self._object.write_root_velocity_to_sim(default_obj_state[7:], env_ids=env_ids)
         
 
 

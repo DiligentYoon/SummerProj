@@ -8,7 +8,6 @@ from __future__ import annotations
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
@@ -16,10 +15,21 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab_assets.robots.franka import FRANKA_PANDA_CFG
 from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
-from isaaclab.controllers import DifferentialIKControllerCfg
 from isaaclab.controllers.joint_impedance import JointImpedanceControllerCfg
 
 from source.SummerProj.SummerProj.envs.direct_diol_env_cfg import DirectDIOLCfg
+
+
+OBJECT_DIR = {
+    "table":{
+        "url": "/table.usd"
+    },
+
+    "stand": {
+        "url": "/stand.usd"
+    }
+}
+
 
 @configclass
 class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
@@ -30,8 +40,20 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
     observation_space: int
     state_space: int
 
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=3.0, replicate_physics=True)
 
+    # ground plane
+    plane = AssetBaseCfg(
+        prim_path="/World/GroundPlane",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -0.612]),
+        spawn=GroundPlaneCfg(),
+    )
+
+    # light
+    dome_light = AssetBaseCfg(
+        prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+    )
+
+    # robot
     robot: ArticulationCfg = FRANKA_PANDA_CFG.replace(
         prim_path="/World/envs/env_.*/Robot",
         spawn=sim_utils.UsdFileCfg(
@@ -42,7 +64,7 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
             max_depenetration_velocity=5.0),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True, solver_position_iteration_count=12, solver_velocity_iteration_count=0),
-        # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
+        collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 0.0),
@@ -59,30 +81,13 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
         ))
     # Impedance Controller를 사용하는 경우, 액추에이터 PD제어 모델 사용 X (중복 토크 계산)
     # 액추에이터에 Impedance Controller가 붙음으로써 최하단 제어기의 역할을 하게 되는 개념.
-    # However, Gripper 액추에이터는 끄지 않고, 추후 Binary Action에 의해 동작하도록 함.
     robot.actuators["panda_shoulder"].stiffness = 0.0
     robot.actuators["panda_shoulder"].damping = 0.0
     robot.actuators["panda_forearm"].stiffness = 0.0
     robot.actuators["panda_forearm"].damping = 0.0
 
-    # ground plane
-    plane = AssetBaseCfg(
-        prim_path="/World/GroundPlane",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -1.05]),
-        spawn=GroundPlaneCfg(),
-    )
-    
-    # goal object marker
-    goal_object_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
-        prim_path="/Visuals/goal_object",
-        markers={
-            "goal": sim_utils.UsdFileCfg(
-                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
-                scale=(1.0, 1.0, 1.0),
-            )
-        },
-    )
 
+    # Goal Marker
     goal_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
         prim_path="Visuals/goal_marker",
         markers={
@@ -104,15 +109,26 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
         }
     )
 
+
+    # stand
+    stand = AssetBaseCfg(
+        prim_path="/World/envs/env_.*/stand",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0.0]),
+        spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["stand"]["url"],
+                                   scale=(1.2, 1.2, 1.2),
+                                   ),
+    )
+
     # Table
     table = AssetBaseCfg(
         prim_path="/World/envs/env_.*/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.5, 0, 0.0], rot=[0.707, 0, 0, 0.707]),
-        spawn=sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.67, 0.0, -0.3], rot=[1.0, 0, 0, 0.0]),
+        spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["table"]["url"],
+                                   collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+                                   scale=(0.7, 1.0, 0.6),
+                                   semantic_tags=[("class", "table")]
+                                   ),
     )
-
-    # events
-    # events: EventCfg = EventCfg()
     
     # Joint Impedance controller
     imp_controller: JointImpedanceControllerCfg = JointImpedanceControllerCfg(
@@ -124,12 +140,6 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
         damping_ratio_limits=(0, 1),
         inertial_compensation=True,
         gravity_compensation=True,)
-    
-    # IK controller
-    ik_controller = DifferentialIKControllerCfg = DifferentialIKControllerCfg(
-        command_type='pose',
-        use_relative_mode=False,
-        ik_method='dls',)
     
     # Scene entities
     robot_entity: SceneEntityCfg = SceneEntityCfg(

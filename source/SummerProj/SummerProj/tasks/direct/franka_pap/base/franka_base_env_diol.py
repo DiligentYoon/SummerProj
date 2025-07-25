@@ -6,19 +6,16 @@
 
 from __future__ import annotations
 
-import numpy as np
 import torch
-from abc import abstractmethod
 
-import isaaclab.sim as sim_utils
-from isaaclab.assets import Articulation
-from source.SummerProj.SummerProj.envs.direct_diol_env import DirectDIOL
+from abc import abstractmethod
+from isaaclab.utils.math import sample_uniform
+from isaaclab.assets import Articulation, RigidObject
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.controllers.joint_impedance import JointImpedanceController
-from isaaclab.controllers import DifferentialIKController
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import sample_uniform
 
+from source.SummerProj.SummerProj.envs.direct_diol_env import DirectDIOL
 from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
 
 class FrankaBaseDIOLEnv(DirectDIOL):
@@ -69,11 +66,6 @@ class FrankaBaseDIOLEnv(DirectDIOL):
                                                        dof_pos_limits=self._robot.data.soft_joint_pos_limits[:, 0:self.num_active_joints, :],
                                                        device=self.device)
         
-        # IK Controller for Position Control
-        self.ik_controller = DifferentialIKController(cfg=self.cfg.ik_controller,
-                                                      num_envs=self.num_envs,
-                                                      device=self.device)
-
         # TCP Marker
         self.tcp_marker = VisualizationMarkers(self.cfg.tcp_cfg)
 
@@ -84,17 +76,20 @@ class FrankaBaseDIOLEnv(DirectDIOL):
 
     def _setup_scene(self):
         self._robot = Articulation(self.cfg.robot)
-        self.scene.articulations["robot"] = self._robot
+        self._table: RigidObject = RigidObject(self.cfg.table)
 
-        spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=(0.0, 0.0, -1.05))
+        self.scene.articulations["robot"] = self._robot
+        self.scene.rigid_objects["table"] = self._table
+
+        # Ground와 Table은 따로 확실하게 Spawn
+        spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=self.cfg.plane.init_state.pos)
         spawn = self.cfg.table.spawn
-        spawn.func(self.cfg.table.prim_path, spawn, translation=(0.5, 0.0, 0.0), orientation=(0.707, 0.0, 0.0, 0.707))
+        spawn.func(self.cfg.table.prim_path, spawn, translation=self.cfg.table.init_state.pos, orientation=(1.0, 0.0, 0.0, 0.0))
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
 
         # add lights
-        light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
-        light_cfg.func("/World/Light", light_cfg)
+        self.cfg.dome_light.spawn.func(self.cfg.dome_light.prim_path, self.cfg.dome_light)
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):

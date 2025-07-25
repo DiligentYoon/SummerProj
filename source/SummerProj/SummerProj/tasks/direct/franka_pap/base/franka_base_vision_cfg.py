@@ -8,8 +8,7 @@ from isaaclab.sensors import TiledCameraCfg
 from isaaclab.assets import RigidObjectCfg
 from isaaclab.utils import configclass
 
-
-from .franka_base_env_cfg import FrankaBaseEnvCfg
+from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
 
 
 # Pre-defined Rotation by OpenGL convention
@@ -61,9 +60,9 @@ OBJECT_DIR = {
 
 
 @configclass
-class FrankaVisionBaseCfg(FrankaBaseEnvCfg):
+class FrankaVisionBaseCfg(FrankaBaseDIOLEnvCfg):
     
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=16, env_spacing=3.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=16, env_spacing=3.0, replicate_physics=False)
 
     # Multi object (Total 6 Objects)
     object: RigidObjectCfg = RigidObjectCfg(

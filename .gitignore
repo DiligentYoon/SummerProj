@@ -23,6 +23,7 @@
 **/*.pyc
 **/*.pb
 **/*.pth
+**/*.gif
 
 # Docker/Singularity
 **/*.sif
