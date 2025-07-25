@@ -285,11 +285,25 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, arg
     sim_time = 0.0
     count = 0
 
+    # ID 뽑아두기
+    table_id = None
+    object_id = None
+    semantic_info = cam_list[0].data.info[0]["semantic_segmentation"]["idToLabels"]
+    for key, value in semantic_info.items():
+        if value.get('class') == 'object':
+            object_id = key  
+        elif value.get('class') == 'table':
+            table_id = key
+
+        if object_id is not None and table_id is not None:
+            break
+
     # Model
     '''MODEL LOADING'''
     classifier = get_model(2).cuda()
     checkpoint = torch.load(args.model_path)
     classifier.load_state_dict(checkpoint['model_state_dict'])
+    classifier.eval()
 
     # Simulate physics
     first = True
@@ -303,24 +317,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, arg
             scene["object"].write_root_velocity_to_sim(default_state[:, 7:])
             scene.write_data_to_sim()
             scene.reset()
-
-            # Object ID 미리 뽑아두기.
-            table_id = None
-            object_id = None
-            semantic_info = cam_list[0].data.info[0]["semantic_segmentation"]["idToLabels"]
-            for key, value in semantic_info.items():
-                if value.get('class') == 'object':
-                    object_id = key  
-                elif value.get('class') == 'table':
-                    table_id = key
-
-                if object_id is not None and table_id is not None:
-                    break
-
-
             print("[INFO]: Resetting robot state...")
-
-        
+      
         sim.step()
         # update sim-time
         sim_time += sim_dt
@@ -334,6 +332,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, arg
         # depth : (Env, Height, Width, 1)
         # semantic_label : (Env, Height, Width, 4)
         # normal : (Env, Height, Width, 3)
+        all_clouds = []
+        all_labels = []
+        all_normals = []
         total_clouds = None
         total_labels = None
         total_normals = None
@@ -364,30 +365,35 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, arg
                 valid_cloud = pointcloud[valid_mask, ...]
                 valid_label = mapped_labels[valid_mask, ...]
                 valid_normal = normal_directions[valid_mask, ...]
+                all_clouds.append(valid_cloud)
+                all_labels.append(valid_label)
+                all_normals.append(valid_normal)
 
                 if torch.sum(valid_label) != torch.sum(mapped_labels):
-                    print(f"분류 오류")
+                      print(f"분류 오류")
                 
-                if total_clouds is None:
-                    total_clouds = valid_cloud
-                    total_labels = valid_label
-                    total_normals = valid_normal
-                else:
-                    total_clouds = torch.concat((total_clouds, valid_cloud), dim=0)
-                    total_labels = torch.concat((total_labels, valid_label), dim=0)
-                    total_normals = torch.concat((total_normals, valid_normal), dim=0)
-            
-            print(f"Cam_{i} --> Valid points 개수 : {valid_cloud.shape[0]}")
+        if all_clouds:
+            total_clouds = torch.cat(all_clouds, dim=0)
+            total_labels = torch.cat(all_labels, dim=0)
+            total_normals = torch.cat(all_normals, dim=0)
+        else:
+            total_clouds = torch.empty((0, 3), device=sim.device)
+            total_labels = torch.empty((0,), dtype=torch.long, device=sim.device)
+            total_normals = torch.empty((0, 3), device=sim.device)
             
                 
         sampled_points, sampled_labels, sampled_normals = uniform_sampling_for_pointnet(total_clouds, total_labels, total_normals)
 
-        # # print(f"총 Valid Points 개수 : {total_clouds.shape[0]}")
         if total_clouds.shape[0] > 0:
             pc_markers.visualize(translations=sampled_points)
-        # pc_markers.visualize(translations=pointcloud)
-        # print("-" * 40)
-        # print("\n\n")
+        
+        with torch.no_grda():
+            # (N, 4+3=7)
+            inputs = torch.cat([sampled_points, sampled_normals, sampled_labels], dim=-1)
+            # (N, 7) -> (1, N, 7) -> (1, 7, N)
+            inputs = inputs.squeeze(0).transpose(2, 1)
+            outputs, _ = classifier(inputs)
+            pred_labels = torch.argmax(outputs, 2).squeeze()
 
 
 def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor, object_id: str, table_id: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -396,16 +402,9 @@ def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor, object_id:
     1. 포인트 좌표에 NaN이나 Inf가 없어야 합니다.
     2. 레이블이 Table 또는 Object여야 합니다.
     """
-    # 1. torch.isfinite()를 사용하여 NaN과 Inf를 한 번에 효율적으로 확인합니다.
-    #    pointcloud의 모든 좌표(x, y, z)가 유한한 수인지 검사합니다.
-    # pcd_valid = torch.all(torch.isfinite(pointcloud), dim=-1)
-
-    # 2. 불필요한 텐서 생성을 제거하고 간결하게 비교합니다.
-    #    '|' 연산자는 tensor에서 torch.logical_or와 동일하게 작동합니다.
     mapped_labels = torch.zeros_like(label, dtype=label.dtype, device=label.device)
     if object_id is not None and table_id is not None:
         object_label_mask = (label == int(object_id))
-        table_label_mask = (label == int(table_id))
         mapped_labels[object_label_mask] = 1
         valid_mask = (label == int(object_id)) | (label == int(table_id))
     else:
@@ -414,23 +413,70 @@ def extract_valid_mask(pointcloud: torch.Tensor, label: torch.Tensor, object_id:
     return valid_mask, mapped_labels
 
 
-def uniform_sampling_for_pointnet(pointcloud: torch.Tensor, 
-                                  label: torch.Tensor, 
+def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
+                                  label: torch.Tensor,
                                   normals: torch.Tensor,
-                                  num_obj=800, num_bg = 1600) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                                  num_obj=800, num_bg=1600) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
-    # label 기반으로 obj, bg index 분류 -> index 자체 샘플링후 매핑
-    obj_ids = torch.where(label==1)[0]
-    bg_ids = torch.where(label!=1)[0]
+    # 포인트가 전혀 없는 경우, 빈 텐서를 즉시 반환
+    if pointcloud.shape[0] == 0:
+        return (torch.empty((0, 3), device=pointcloud.device),
+                torch.empty((0,), dtype=label.dtype, device=label.device),
+                torch.empty((0, 3), device=normals.device))
 
-    sampled_obj_ids = obj_ids[torch.randperm(len(obj_ids))[:num_obj]]
-    sampled_bg_ids = bg_ids[torch.randperm(len(bg_ids))[:num_bg]]
+    obj_ids = torch.where(label == 1)[0]
+    bg_ids = torch.where(label != 1)[0]
+    
+    sampled_obj_ids = torch.empty((0,), dtype=torch.long, device=pointcloud.device)
+    sampled_bg_ids = torch.empty((0,), dtype=torch.long, device=pointcloud.device)
 
+    # --- Object 샘플링 (안정성 강화) ---
+    if len(obj_ids) > 0:
+        if len(obj_ids) >= num_obj: # 포인트가 충분하면 비복원 추출
+            sampled_obj_ids = obj_ids[torch.randperm(len(obj_ids))[:num_obj]]
+        else: # 포인트가 부족하면 복원 추출로 개수를 맞춤
+            indices_to_sample = torch.randint(0, len(obj_ids), (num_obj,), device=pointcloud.device)
+            sampled_obj_ids = obj_ids[indices_to_sample]
+
+    # --- Background 샘플링 (안정성 강화) ---
+    if len(bg_ids) > 0:
+        if len(bg_ids) >= num_bg: # 포인트가 충분하면 비복원 추출
+            sampled_bg_ids = bg_ids[torch.randperm(len(bg_ids))[:num_bg]]
+        else: # 포인트가 부족하면 복원 추출
+            indices_to_sample = torch.randint(0, len(bg_ids), (num_bg,), device=pointcloud.device)
+            sampled_bg_ids = bg_ids[indices_to_sample]
+
+    # 최종 셔플링 로직은 동일
     cat_sampled_ids = torch.cat((sampled_obj_ids, sampled_bg_ids))
+    
+    # 합쳐진 인덱스가 없는 경우 처리
+    if len(cat_sampled_ids) == 0:
+        return (torch.empty((0, 3), device=pointcloud.device),
+                torch.empty((0,), dtype=label.dtype, device=label.device),
+                torch.empty((0, 3), device=normals.device))
 
     sampled_ids = cat_sampled_ids[torch.randperm(len(cat_sampled_ids))]
 
     return pointcloud[sampled_ids, ...], label[sampled_ids, ...], normals[sampled_ids, ...]
+
+
+# def uniform_sampling_for_pointnet(pointcloud: torch.Tensor, 
+#                                   label: torch.Tensor, 
+#                                   normals: torch.Tensor,
+#                                   num_obj=800, num_bg = 1600) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+#     # label 기반으로 obj, bg index 분류 -> index 자체 샘플링후 매핑
+#     obj_ids = torch.where(label==1)[0]
+#     bg_ids = torch.where(label!=1)[0]
+
+#     sampled_obj_ids = obj_ids[torch.randperm(len(obj_ids))[:num_obj]]
+#     sampled_bg_ids = bg_ids[torch.randperm(len(bg_ids))[:num_bg]]
+
+#     cat_sampled_ids = torch.cat((sampled_obj_ids, sampled_bg_ids))
+
+#     sampled_ids = cat_sampled_ids[torch.randperm(len(cat_sampled_ids))]
+
+#     return pointcloud[sampled_ids, ...], label[sampled_ids, ...], normals[sampled_ids, ...]
 
 
 
