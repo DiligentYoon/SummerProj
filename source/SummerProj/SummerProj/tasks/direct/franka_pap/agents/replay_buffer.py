@@ -32,8 +32,6 @@ class EpisodeWiseReplayBuffer(Memory):
                     terminated: torch.Tensor, 
                     truncated: torch.Tensor) -> None:
         """
-        한 타임스텝의 데이터를 에피소드 버퍼에 추가합니다.
-
             입력 텐서들의 shape: (num_envs, feature_dim)
         """
         # shape: (num_envs,)
@@ -67,83 +65,6 @@ class EpisodeWiseReplayBuffer(Memory):
         # 버퍼의 최대 크기를 넘지 않도록 나머지 연산을 수행합니다 (안전장치).
         self.memory_index[dones] = 0
         self.memory_index %= self.memory_size
-
-
-
-class LowLevelHindSightReplayBuffer(Memory):
-
-    def __init__(
-        self,
-        memory_size: int,
-        device: Optional[Union[str, torch.device]] = None,
-        export: bool = False,
-        export_format: str = "pt",
-        export_directory: str = "",
-        k_num: int = 4,
-        strategy: str = "future"
-    ) -> None:
-        super().__init__(memory_size=memory_size, 
-                         num_envs=1, 
-                         device=device, 
-                         export=export, 
-                         export_format=export_format, 
-                         export_directory=export_directory)
-        self.k = k_num
-        self.strategy = strategy
-    
-    def add_samples(self, **tensors):
-        # 현재 배치 크기 확인
-        batch_size = next(iter(tensors.values())).shape[0]
-        
-        # 남은 공간 계산
-        space_left = self.memory_size - self.memory_index
-        
-        # 한 번에 추가할 수 있는 양과, 순환하여 추가할 양으로 나눔
-        fit_size = min(batch_size, space_left)
-        overflow_size = batch_size - fit_size
-
-        # ======= 버퍼에 데이터 복사 ========
-        for name, tensor in tensors.items():
-            if name in self.tensors:
-                # 버퍼의 남은 공간에 데이터 채우기
-                #    (batch_size, feat) -> (batch_size, 1, feat)로 unsqueeze하여 저장
-                self.tensors[name][self.memory_index : self.memory_index + fit_size] = tensor[:fit_size].unsqueeze(1)
-
-                # 버퍼 용량을 넘는 데이터는 처음부터 덮어쓰기 (Queue형 버퍼)
-                if overflow_size > 0:
-                    self.tensors[name][0:overflow_size] = tensor[fit_size:].unsqueeze(1)
-        
-        # 포인터 업데이트
-        self.memory_index = (self.memory_index + batch_size) % self.memory_size
-        if not self.filled and (self.memory_index + batch_size >= self.memory_size):
-            self.filled = True
-    
-    def sample(self, batch_size: int, names: list[str]) -> tuple[list[torch.Tensor], torch.Tensor]:
-        """
-        버퍼에서 무작위로 transition 배치를 샘플링
-        
-        :param batch_size: 샘플링할 배치의 크기
-        :param names: 샘플링할 텐서의 이름 리스트
-        :return: 텐서 리스트와 샘플링된 인덱스
-        """
-        # 샘플링 가능한 최대 인덱스
-        max_index = self.memory_size if self.filled else self.memory_index
-        if max_index == 0:
-            return [torch.empty(0) for _ in names], torch.empty(0)
-            
-        # batch_size 만큼의 랜덤 인덱스 생성
-        indexes = torch.randint(0, max_index, (batch_size,), device=self.device)
-        
-        # 해당 인덱스의 데이터를 가져와서 리스트에 담음
-        sampled_tensors = []
-        for name in names:
-            # (batch_size, 1, feat) -> (batch_size, feat)로 squeeze하여 반환
-            sampled_tensors.append(self.tensors[name][indexes].squeeze(1))
-            
-        return sampled_tensors
-
-
-
 
 class HighLevelHindSightReplayBuffer(Memory):
 

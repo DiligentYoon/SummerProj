@@ -24,9 +24,21 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         self.data_type = self.cfg.front_camera.data_types
         self.table_id = None
         self.object_id = None
+
+        # 모든 환경의 table & object semantic label이 동일하다 가정
+        semantic_info = self.cam_list[0].data.info["semantic_segmentation"]["idToLabels"]
+        for key, value in semantic_info.items():
+            if value.get('class') == 'table':
+                self.table_id = int(key)
+            if value.get('class') == 'object':
+                self.table_id = int(key)
+            
+            if (self.table_id is not None) and (self.object_id is not None):
+                break
         
 
     def _setup_scene(self):
+        super()._setup_scene()
         self._object: RigidObject =  RigidObject(self.cfg.object)
         self.cam_list: list[TiledCamera, TiledCamera, TiledCamera] = [TiledCamera(self.cfg.front_camera), 
                                                                       TiledCamera(self.cfg.left_behind_camera), 
@@ -36,17 +48,11 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         self.scene.sensors["left_cam"] = self.cam_list[1]
         self.scene.sensors["right_cam"] = self.cam_list[2]
 
-        # 모든 환경의 table & object semantic label이 동일하다 가정
-        semantic_info = self.cam_list[0].data.info[0]["semantic_segmentation"]["idToLabels"]
-        for key, value in semantic_info.items():
-            if value.get('class') == 'table':
-                self.table_id = int(key)
-            if value.get('class') == 'object':
-                self.table_id = int(key)
-            
-            if (self.table_id is not None) and (self.object_id is not None):
-                break
-        super()._setup_scene()
+        self.scene.clone_environments(copy_from_source=False)
+
+        # Spawn Light
+        light_cfg = self.cfg.dome_light.spawn
+        light_cfg.func(self.cfg.dome_light.prim_path, light_cfg)
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -65,7 +71,7 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         default_obj_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
         # object 상태 업데이트
         self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
-        self._object.write_root_velocity_to_sim(default_obj_state[7:], env_ids=env_ids)
+        self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)
         
 
 

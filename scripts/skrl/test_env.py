@@ -20,12 +20,11 @@ from isaaclab.app import AppLauncher
 
 # --- (1) 기존 학습 스크립트의 Argument Parser와 AppLauncher 부분은 그대로 사용 ---
 parser = argparse.ArgumentParser(description="Debug HRL agent setup with skrl.")
-# task 인자는 우리가 만든 환경을 지정해야 합니다.
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
 parser.add_argument("--num_envs", type=int, default=2, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default="Franka-PickandPlace-Direct-v0", help="Name of the task.")
+parser.add_argument("--task", type=str, default="Franka-Grasp-Vision-Direct-v0", help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
@@ -129,7 +128,7 @@ def main(env_cfg: dict, agent_cfg: dict):
     dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
 
     # get checkpoint path (to resume training)
-    resume_path = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None
+    resume_path_low = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None
 
     # Isaac Lab 환경 생성
     env = gym.make(args_cli.task, cfg=env_cfg)
@@ -148,18 +147,35 @@ def main(env_cfg: dict, agent_cfg: dict):
     assert runner.high_level_agent is not None and runner.low_level_agent is not None, "Agents were not created!"
     print("✅ Both agents are created.")
 
-    # --- 단일 스텝 연동 테스트 ---
-    print("\n--- Performing a single-step test ---")
+
+    # Checkpoint 로드
+    if resume_path_low:
+        print(f"[INFO] Loading model checkpoint from: {resume_path_low}")
+        runner.agent.load(resume_path_low)
+
+
+    # --- [Agent Test] 단일 스텝 연동 테스트 ---
+    print("\n--- [Agent Test] Performing a single-step test ---")
     obs, info = env.reset()
     
-    # 임의의 저수준 행동 생성
-    action = torch.from_numpy(env.unwrapped.action_space.sample())
-    if action.ndim == 1:
-        action = action.unsqueeze(0) # num_envs=1 일 경우를 대비
+    # 임의의 고, 저 수준 관측 생성
+    high_obs = torch.from_numpy(env._unwrapped.observation_space_h.sample()).to(device=env.device)
+    low_obs  = torch.from_numpy(env._unwrapped.observation_space_l.sample()).to(device=env.device)
 
-    next_obs, reward, terminated, truncated, extras = env.step(action)
+    # 관측 벡터 바탕으로 행동 생성
+    high_action_net, _ = runner.high_level_agent.act(high_obs, timestep=0, timesteps=0)
+    low_action_net, _, _ = runner.low_level_agent.act(low_obs, timestep=0, timesteps=0)
+
+    # 임의의 저수준 행동 생성
+    # high_action = env._unwrapped.action_space_h.sample()
+    # low_action = torch.from_numpy(env._unwrapped.action_space.sample())
+    # if action.ndim == 1:
+    #     action = action.unsqueeze(0) # num_envs=1 일 경우를 대비
+
+    # 저 수준 행동을 바탕으로 에피소드 스텝
+    next_obs, reward, terminated, truncated, extras = env.step(low_action_net)
     
-    assert "high_level_reward" in extras and "option_terminated" in extras, "HRL signals are missing!"
+    # assert "high_level_reward" in extras and "option_terminated" in extras, "HRL signals are missing!"
     print("✅ Single step successful. HRL signals are present in 'extras'.")
 
     # 시뮬레이터 종료

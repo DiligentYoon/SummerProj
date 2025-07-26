@@ -11,7 +11,7 @@ from skrl.utils.runner.torch import Runner
 from skrl.models.torch import Model
 
 class AISLRunner(Runner):
-    # 기존 SKRL에서 제공하는 Runner Class를 오버라이딩. Custom Model에 대한 처리만 따로 수행
+    # 기존 SKRL에서 제공하는 Runner Class를 오버라이딩
     def _generate_models(self, env, cfg: Mapping[str, Any]) -> Mapping[str, Mapping[str, Model]]:
         multi_agent = False
         device = env.device

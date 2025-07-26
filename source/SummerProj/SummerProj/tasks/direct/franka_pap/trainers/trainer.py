@@ -46,8 +46,8 @@ class HRLTrainer(Trainer):
         _cfg.update(kwargs if kwargs is not None else {})
         if _cfg["timesteps"] is None:
             _cfg["timesteps"] = (env._unwrapped.max_episode_length * _cfg["epoch_interval"]   * \
-                                                                  _cfg["episode_interval"] * \
-                                                                  _cfg["cycle_interval"])
+                                                                     _cfg["episode_interval"] * \
+                                                                     _cfg["cycle_interval"])
 
         # skrl의 Trainer를 상속받아 초기화 : Low Level Agent만 전달.
         # Superclass의 유효성 검사 통과하여 기본 기능 상속받기 위함.
@@ -61,6 +61,11 @@ class HRLTrainer(Trainer):
             raise ValueError("The 'agents' dictionary must contain 'high_level' and 'low_level' keys.")
 
         # AAES 파라미터
+        self.use_pre_trained_low = self.low_level_agent.cfg["use_pre_trained"]
+        if self.use_pre_trained_low:
+            self.checkpoint_path_low = self.low_level_agent.cfg["checkpoint_path"]
+        else:
+            self.checkpoint_path_low = None
         self.aaes_params = self.cfg.get("aaes_kwargs", {})
         self.current_noise_std = self.aaes_params.get("max_std")
         self.current_random_action_ratio = self.aaes_params.get("max_uniform")
@@ -74,7 +79,6 @@ class HRLTrainer(Trainer):
 
         # 학습 로직 관련 변수
         self.current_high_level_action = torch.zeros((self.env.num_envs, 1), dtype=torch.long, device=self.env.device)
-        self.needs_new_high_level_action = True
         self.h_start_states = {
             "observation": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space.shape[-1]), 
                                        device=self.env.device, dtype=torch.float32),
@@ -83,35 +87,26 @@ class HRLTrainer(Trainer):
         }
         self.h_actions = torch.zeros((self.env.num_envs, 1), device=self.env.device)
 
-        # HER을 구현하기 위한 에피소드 버퍼 초기화
-        low_level_obs_space = self.low_level_agent.observation_space
-        low_level_action_space = self.low_level_agent.action_space
+        # HACMAN 전용 HER을 구현하기 위한 에피소드 버퍼 초기화
         self.max_episode_buffer_length = env._unwrapped.max_episode_length
         
         self.episode_buffer = EpisodeWiseReplayBuffer(self.max_episode_buffer_length, self.env.num_envs, self.env.device)
-        self.episode_buffer.create_tensor("states", size=self.env._unwrapped.observation_space, dtype=torch.float32)
-        self.episode_buffer.create_tensor("sub_goal", size=self.env._unwrapped.cfg.low_level_goal_dim, dtype=torch.float32)
-        self.episode_buffer.create_tensor("final_goal", size=self.env._unwrapped.cfg.high_level_goal_dim,dtype=torch.float32)
-        self.episode_buffer.create_tensor("action", size=low_level_action_space, dtype=torch.float32)
+        self.episode_buffer.create_tensor("states", size=1, dtype=torch.float32)
+        self.episode_buffer.create_tensor("action", size=1, dtype=torch.float32)
         self.episode_buffer.create_tensor("reward", size=1, dtype=torch.float32)
-        self.episode_buffer.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim, dtype=torch.float32)
-        self.episode_buffer.create_tensor("next_states", size=self.env._unwrapped.observation_space, dtype=torch.float32)
+        self.episode_buffer.create_tensor("next_states", size=1, dtype=torch.float32)
         self.episode_buffer.create_tensor("terminated", size=1, dtype=torch.bool)
         self.episode_buffer.create_tensor("truncated", size=1, dtype=torch.bool)
+        self.episode_buffer.create_tensor("achieved_goal", size=1, dtype=torch.float32)
+        self.episode_buffer.create_tensor("desired_goal", size=1, dtype=torch.float32)
 
         # 에이전트 초기화 & 리플레이 버퍼에 HRL 전용 Term 추가
         self.high_level_agent.init(trainer_cfg = self.cfg)
         self.low_level_agent.init(trainer_cfg = self.cfg)
-
-        self.high_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.high_level_goal_dim, dtype=torch.float32)
-        self.high_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.high_level_goal_dim, dtype=torch.float32)
-        self.low_level_agent.memory.create_tensor("desired_goal", size=self.env._unwrapped.cfg.low_level_goal_dim, dtype=torch.float32)
-        self.low_level_agent.memory.create_tensor("achieved_goal", size=self.env._unwrapped.cfg.achieved_goal_dim, dtype=torch.float32)
         
         for k_high, k_low in zip(self.high_level_agent.memory.tensors.keys(), self.low_level_agent.memory.tensors.keys()):
             self.high_level_agent._tensors_names.append(k_high)
             self.low_level_agent._tensors_names.append(k_low)
-        
         print("[HRLTrainer] Initialize agents...")
     
 
@@ -119,14 +114,15 @@ class HRLTrainer(Trainer):
     def train(self) -> None:
         print("[HRLTrainer] Starting HRL Training...")
         self.high_level_agent.set_running_mode("train")
-        self.low_level_agent.set_running_mode("train")
+        if not self.use_pre_trained_low:
+            self.low_level_agent.set_running_mode("train")
+        else:
+            self.low_level_agent.set_running_mode("eval")
 
         obs, info = self.env.reset()
 
-        # High-Level Goal
-        self.high_level_demo = self._sample_new_high_level_demo()
-        self.high_level_goal = self._sample_new_high_level_goal()
-        self.env._unwrapped.set_high_level_goal(self.high_level_goal)
+        # High-Level Logic
+        self.needs_new_high_level_action = True
 
         # Initialization Count for Loop
         self.episode_count = 0
@@ -144,41 +140,40 @@ class HRLTrainer(Trainer):
 
             # ====== Hierarchical Control Logic =======
             if self.needs_new_high_level_action:
-                # High-Level state : (s, g^H)
-                high_level_state = torch.cat((obs["policy"]["observation"], obs["policy"]["final_goal"]), dim=1)
-                # High-Level Agent action : Discrete Action from DIOL Agent
-                high_level_action, _, _ = self.high_level_agent.act(high_level_state, timestep=timestep, timesteps=self.timesteps)
-
-            # [Mapping Function] : From High-Level Action to Low-Level Goal State
-            low_level_goal = self._map_goal(high_level_action, obs)
-            self.env._unwrapped.set_low_level_goals(low_level_goal)
-
-            self.needs_new_high_level_action = False
-            # Recording High-Level Action at Start Point
-            self._start_high_level_transition(obs, high_level_action)
+                high_level_obs = info["high_level_obs"]
+                high_level_action = self._sample_new_high_level_goal(high_level_obs, timestep)
+                # Mapping from high level abstraction to low level goal
+                self.env._unwrapped._apply_high_action(high_level_action)
+                self.needs_new_high_level_action = False
+                # Recording High-Level Action at Start Point
+                self._start_high_level_transition(obs, high_level_action)
 
 
             # ====== Low-Level action with AAES Logic ======
-            low_level_state = torch.cat((obs["policy"]["observation"], obs["policy"]["sub_goal"]), dim=1)
-            low_level_action = self.low_level_agent.act(low_level_state, timestep=timestep, timesteps=self.timesteps)[0]
-            action_to_env = self._apply_aaes(low_level_action)
+            low_level_obs = obs
+            low_level_action = self.low_level_agent.act(low_level_obs, timestep=timestep, timesteps=self.timesteps)[0]
+            # AAES 우선 보류
+            # action_to_env = self._apply_aaes(low_level_action)
 
             # Environment step
-            next_obs, reward, terminated, truncated, info = self.env.step(action_to_env)
-            next_obs_dict = info["obs"]
+            next_obs, reward, terminated, truncated, info = self.env.step(low_level_action)
+
+
+            # =========================================================================== #
 
             # ====== Recording Experience in Episode Buffer ======
-            self._store_to_episode_buffer(obs, 
-                                          action_to_env, 
+            self._store_to_episode_buffer(low_level_obs, 
+                                          low_level_action, 
                                           reward, 
-                                          next_obs_dict, 
+                                          next_obs, 
                                           terminated, 
-                                          truncated)
+                                          truncated,
+                                          info)
             
             self._record_high_level_transition(obs, 
                                                high_level_action, 
                                                info.get("high_level_reward"), 
-                                               next_obs_dict,
+                                               next_obs,
                                                terminated,
                                                truncated,
                                                info,
@@ -202,14 +197,15 @@ class HRLTrainer(Trainer):
             if self.episode_count > 0 and self.episode_count % self.cfg["episode_interval"] == 0:
                 self.cycle_count += 1
                 self.high_level_agent._update()
-                self.low_level_agent._update()
+                if not self.use_pre_trained_low:
+                    self.low_level_agent._update()
                 self.episode_count = 0 # 사이클 내 에피소드 카운터 리셋
             
             # [Per Epoch] 성능 평가 및 AAES 업데이트
             if self.cycle_count > 0 and self.cycle_count % self.cfg["cycle_interval"] == 0:
                 self.epoch_count += 1
-                success_rate = self.eval()
-                self._update_aaes_params(success_rate)
+                # success_rate = self.eval()
+                # self._update_aaes_params(success_rate)
                 self.cycle_count = 0
 
 
@@ -232,7 +228,6 @@ class HRLTrainer(Trainer):
             current_demo_step = 0
             needs_new_high_level_action = True
             obs, info = self.env.reset()
-            high_level_demo = self._sample_new_high_level_demo()
             high_level_goal = self._sample_new_high_level_goal()
             self.env._unwrapped.set_high_level_goal(high_level_goal)
             
@@ -291,9 +286,9 @@ class HRLTrainer(Trainer):
         return _demo.repeat(self.env.num_envs, 1)
     
 
-    def _sample_new_high_level_goal(self) -> torch.Tensor:
-
-        return self.env._unwrapped.set_high_level_goal()
+    def _sample_new_high_level_goal(self, obs: torch.Tensor, timestep: int) -> torch.Tensor:
+        action, _ = self.high_level_agent.act(obs, timestep=timestep, timesteps=self.timesteps)
+        return action
 
 
     def _start_high_level_transition(self, obs: Dict, high_level_action: torch.Tensor) -> None:

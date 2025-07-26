@@ -3,39 +3,37 @@ seed: 42
 
 models:
   high_level:
-    q_network:
-      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaQNetwork
-      # FrankaQNetwork의 __init__에 전달할 파라미터들
-      features: [256, 128, 64]
-    target_q_network:
-      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaQNetwork
-      features: [256, 128, 64]
+    policy:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridActorNet
+    value_1:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridCriticNet
+    target_value_1:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridCriticNet
+    value_2:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridCriticNet
+    target_value_2:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridCriticNet
+
   
   low_level:
     separate: True
-    policy:
-      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaDeterministicPolicy
-      # FrankaDeterministicPolicy의 __init__에 전달할 파라미터들
+    policy: 
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaGaussianPolicy
+      # FrankaGaussianPolicy의 __init__에 전달할 파라미터들
       encoder_features: [256, 128]
       policy_features: [64]
+      max_log_std: 0.0
       clip_actions: False
-    critic_1:
-      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
-      encoder_features: [256, 128]
-      value_features: [64]
-    critic_2:
-      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
-      encoder_features: [256, 128]
-      value_features: [64]
-    target_critic_1:
-      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
-      encoder_features: [256, 128]
-      value_features: [64]
-    target_critic_2:
-      _target_: SummerProj.tasks.direct.franka_pap.models.custom_diol_net.FrankaValue
-      encoder_features: [256, 128]
-      value_features: [64]
+      clip_log_std: True
+      min_log_std: -20.0
+      max_log_std: 2.0
 
+    value:  
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaValue
+      # FrankaValue의 __init__에 전달할 파라미터들
+      encoder_features: [256, 128]
+      value_features: [64]
+      clip_actions: False
 
 # Rollout memory
 # https://skrl.readthedocs.io/en/latest/api/memories/random.html
@@ -46,6 +44,7 @@ memory:
 
   # 2-2. 저수준 에이전트를 위한 리플레이 버퍼
   low_level:
+    class: RandomMemory
     memory_size: 1000000
 
 
@@ -53,8 +52,7 @@ memory:
 agent:
   # 3-1. 고수준 에이전트 (커스텀 DIOL 에이전트)
   high_level:
-    class: DIOL
-    gradient_steps: 1
+    gradient_steps: 3
     batch_size: 64
 
     discount_factor: 0.99 # 감가율 (gamma)
@@ -71,9 +69,9 @@ agent:
     learning_starts: 1000  # 학습 시작 전 최소 경험 수
 
     exploration: 
-        "initial_epsilon": 1.0,       # initial epsilon for epsilon-greedy exploration
-        "final_epsilon": 1e-5,        # final epsilon for epsilon-greedy exploration
-        "timesteps": 1000,            # timesteps for epsilon-greedy decay
+        initial_epsilon: 1.0       # initial epsilon for epsilon-greedy exploration
+        final_epsilon: 0.01        # final epsilon for epsilon-greedy exploration
+        timesteps: 100000           # timesteps for epsilon-greedy decay
     
     experiment:
       directory: "franka_pap"
@@ -83,27 +81,34 @@ agent:
 
   # 3-2. 저수준 에이전트
   low_level:
-    class: DDPG
-    gradient_steps: 1
-    batch_size: 64
+    use_pre_trained: False
+    checkpoint_path: null
 
-    discount_factor: 0.99 # 감가율 (gamma)
-    polyak: 0.005
-
-    actor_learning_rate: 1.0e-4
-    critic_learning_rate: 1.0e-4
+    class: PPO
+    rollouts: 12
+    learning_epochs: 8
+    mini_batches: 8
+    discount_factor: 0.99
+    lambda: 0.95
+    learning_rate: 5.0e-04
     learning_rate_scheduler: KLAdaptiveLR
     learning_rate_scheduler_kwargs:
       kl_threshold: 0.008
-
     state_preprocessor: RunningStandardScaler
     state_preprocessor_kwargs: null
-
-    random_timesteps: 1000 # 초기 랜덤 탐험 스텝
-    learning_starts: 1000  # 학습 시작 전 최소 경험 수
-
+    value_preprocessor: RunningStandardScaler
+    value_preprocessor_kwargs: null
+    random_timesteps: 0
+    learning_starts: 0
     grad_norm_clip: 1.0
-
+    ratio_clip: 0.2
+    value_clip: 0.2
+    clip_predicted_values: True
+    entropy_loss_scale: 0.0
+    value_loss_scale: 2.0
+    kl_threshold: 0.0
+    rewards_shaper_scale: 0.1
+    time_limit_bootstrap: False
     # logging and checkpoint
     experiment:
       directory: "franka_pap"
@@ -111,13 +116,41 @@ agent:
       write_interval: auto
       checkpoint_interval: auto
 
+    # class: DDPG
+    # gradient_steps: 1
+    # batch_size: 64
+
+    # discount_factor: 0.99 # 감가율 (gamma)
+    # polyak: 0.005
+
+    # actor_learning_rate: 1.0e-4
+    # critic_learning_rate: 1.0e-4
+    # learning_rate_scheduler: KLAdaptiveLR
+    # learning_rate_scheduler_kwargs:
+    #   kl_threshold: 0.008
+
+    # state_preprocessor: RunningStandardScaler
+    # state_preprocessor_kwargs: null
+
+    # random_timesteps: 1000 # 초기 랜덤 탐험 스텝
+    # learning_starts: 1000  # 학습 시작 전 최소 경험 수
+
+    # grad_norm_clip: 1.0
+
+    # # logging and checkpoint
+    # experiment:
+    #   directory: "franka_pap"
+    #   experiment_name: ""
+    #   write_interval: auto
+    #   checkpoint_interval: auto
+
 
 # Trainer
 # https://skrl.readthedocs.io/en/latest/api/trainers/
 trainer:
   _target_: SummerProj.tasks.direct.franka_pap.trainers.trainer.HRLTrainer
   timesteps: null
-  epoch_interval: 1
+  epoch_interval: 5
   cycle_interval: 50
   episode_interval: 16
   # AAES (Auto-Adjusting Exploration Strategy)

@@ -76,20 +76,22 @@ class FrankaBaseDIOLEnv(DirectDIOL):
 
     def _setup_scene(self):
         self._robot = Articulation(self.cfg.robot)
-        self._table: RigidObject = RigidObject(self.cfg.table)
-
         self.scene.articulations["robot"] = self._robot
-        self.scene.rigid_objects["table"] = self._table
 
-        # Ground와 Table은 따로 확실하게 Spawn
+        # Spawn Ground
         spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=self.cfg.plane.init_state.pos)
-        spawn = self.cfg.table.spawn
-        spawn.func(self.cfg.table.prim_path, spawn, translation=self.cfg.table.init_state.pos, orientation=(1.0, 0.0, 0.0, 0.0))
-        # clone and replicate
-        self.scene.clone_environments(copy_from_source=False)
 
-        # add lights
-        self.cfg.dome_light.spawn.func(self.cfg.dome_light.prim_path, self.cfg.dome_light)
+        # Spawn Stand
+        stand_cfg = self.cfg.stand.spawn
+        stand_cfg.func(self.cfg.stand.prim_path, stand_cfg,
+                       translation=self.cfg.stand.init_state.pos,
+                       orientation=(1.0, 0.0, 0.0, 0.0))
+        
+        # Spawn Table
+        table_cfg = self.cfg.table.spawn
+        table_cfg.func(self.cfg.table.prim_path, table_cfg, 
+                   translation=self.cfg.table.init_state.pos, 
+                   orientation=(1.0, 0.0, 0.0, 0.0),)
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):

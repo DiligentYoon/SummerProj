@@ -26,16 +26,16 @@ class FrankaPapEnv(FrankaBaseDIOLEnv):
         super().__init__(cfg, render_mode, **kwargs)
 
         # Extras Info
-        self.extras["high_level_reward"] = torch.zeros((self.num_envs, 1), device=self.device)
-        self.extras["option_terminated"] = torch.zeros((self.num_envs, 1), dtype=torch.bool, device=self.device)
-        self.extras["low_level_goal"] = torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
-        self.extras["high_level_goal"] = torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), device=self.device)
-        self.extras["achieved_goal"] = torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device)
+        # self.extras["high_level_reward"] = torch.zeros((self.num_envs, 1), device=self.device)
+        # self.extras["option_terminated"] = torch.zeros((self.num_envs, 1), dtype=torch.bool, device=self.device)
+        # self.extras["low_level_goal"] = torch.zeros((self.num_envs, self.cfg.low_level_goal_dim), device=self.device)
+        # self.extras["high_level_goal"] = torch.zeros((self.num_envs, self.cfg.high_level_goal_dim), device=self.device)
+        # self.extras["achieved_goal"] = torch.zeros((self.num_envs, self.cfg.achieved_goal_dim), device=self.device)
 
         # Observation Buffer
         self.obs_buf = {
-            "policy": torch.zeros((self.num_envs, self.cfg.observation_space+self.cfg.low_level_goal_dim), device=self.device),
-            "critic": torch.zeros((self.num_envs, self.cfg.observation_space+self.cfg.low_level_goal_dim+self.cfg.action_space), device=self.device)
+            "policy": torch.zeros(self.num_envs, self.cfg.observation_space, device=self.device),
+            "critic": torch.zeros(self.num_envs, self.cfg.observation_space, device=self.device)
         }
 
         # Controller Commands & Scene Entity

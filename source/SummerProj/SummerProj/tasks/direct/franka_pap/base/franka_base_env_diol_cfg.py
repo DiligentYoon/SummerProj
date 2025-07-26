@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
-
+import os
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.managers import SceneEntityCfg
@@ -50,7 +50,7 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
 
     # light
     dome_light = AssetBaseCfg(
-        prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+        prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75)),
     )
 
     # robot
@@ -64,7 +64,7 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
             max_depenetration_velocity=5.0),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True, solver_position_iteration_count=12, solver_velocity_iteration_count=0),
-        collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+        # collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 0.0),

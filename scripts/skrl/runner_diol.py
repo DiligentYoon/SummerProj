@@ -17,10 +17,8 @@ from skrl.utils.runner.torch import Runner
 from skrl.models.torch import Model
 from skrl.agents.torch import Agent
 
-from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.replay_buffer import LowLevelHindSightReplayBuffer
 from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.replay_buffer import HighLevelHindSightReplayBuffer
-from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.diol_agent import DIOLAgent
-from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.low_agent import DDPGAgent
+from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.hac_agent import HybridActorCriticAgent
 from source.SummerProj.SummerProj.tasks.direct.franka_pap.trainers.trainer import HRLTrainer
 
 
@@ -30,31 +28,14 @@ class AISLDIOLRunner(Runner):
         device = env.device
         models_cfg = copy.deepcopy(cfg.get("models", {}))
 
-
-        # ==== 각 Level에 맞는 Action/Observation Space 정의 ====
-        # High-Level 정책(DIOL)을 위한 공간
-        # observation : 공통 state
-        # desired_goal : high-level goal
-        # High-Level Policy : \pi_{g}^H (a^H | s, g^H)
-        # g^H : High-Level Goal -> Binary Vector with N dimension (N : pre-difined # of steps)
-        single_high_level_observation_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(env._unwrapped.cfg.high_level_goal_dim + env._unwrapped.single_observation_space["policy"].shape[0],))
-        single_high_level_action_space = gym.spaces.Discrete(env._unwrapped.cfg.high_level_action_dim)
-
-        # Low-Level 정책(DDPG)을 위한 공간은 환경에서 정의 : 값만 가져오기
-        high_level_observation_space = gym.vector.utils.batch_space(single_high_level_observation_space, self._env.num_envs)
-        high_level_action_space = gym.vector.utils.batch_space(single_high_level_action_space, self._env.num_envs)
-        low_level_observation_space = env._unwrapped.observation_space
-        low_level_action_space = env._unwrapped.action_space
-
         # ==== 모델을 저장할 Dictionary 초기화 ====
         models = {
             "high_level": {},
             "low_level": {}
         }
 
-
-        # ======== High Level 모델 생성 (DIOL Q Network) ========
-        print("[AISLRunner] Instantiating high-level models (for DIOL Agent)...")
+        # ======== High Level 모델 생성 ========
+        print("[AISLRunner] Instantiating high-level models ...")
         high_level_models_cfg = models_cfg.get("high_level", {})
         if not high_level_models_cfg:
             raise ValueError("Configuration 'models.high_level' not found.")
@@ -62,15 +43,15 @@ class AISLDIOLRunner(Runner):
         for role, model_config in high_level_models_cfg.items():
             # Hydra를 사용하여 커스텀 모델 인스턴스화
             if "_target_" in model_config:
-                model_config["observation_space"] = high_level_observation_space
-                model_config["action_space"] = high_level_action_space
+                model_config["observation_space"] = env._unwrapped.single_observation_space_h["policy"]
+                model_config["action_space"] = env._unwrapped.single_action_space_h
                 model_config["device"] = device
                 models["high_level"][role] = hydra.utils.instantiate(model_config)
                 print(f"  - Instantiated high-level model for role: '{role}'")
 
 
-        # ========== Low-Level 모델 (DDPG Networks) 생성 ==========
-        print("[AISLRunner] Instantiating low-level models (for DDPG Agent)...")
+        # ========== Low-Level 모델 생성 ==========
+        print("[AISLRunner] Instantiating low-level models ...")
         low_level_models_cfg = models_cfg.get("low_level", {})
         if not low_level_models_cfg:
             raise ValueError("Configuration 'models.low_level' not found.")
@@ -82,12 +63,8 @@ class AISLDIOLRunner(Runner):
         for role, model_config in low_level_models_cfg.items():
             # Hydra를 사용하여 커스텀 모델 인스턴스화
             if "_target_" in model_config:
-                if role == "policy":
-                    model_config["observation_space"] = low_level_observation_space["policy"]
-                    model_config["action_space"] = low_level_action_space
-                else:
-                    model_config["observation_space"] = low_level_observation_space["critic"]
-                    model_config["action_space"] = low_level_action_space
+                model_config["observation_space"] = env._unwrapped.single_observation_space["policy"]
+                model_config["action_space"] = env.action_space
                 model_config["device"] = device
                 models["low_level"][role] = hydra.utils.instantiate(model_config)
                 print(f"  - Instantiated low-level model for role: '{role}'")
@@ -101,8 +78,8 @@ class AISLDIOLRunner(Runner):
 
     def _generate_agent(self, env, cfg: Mapping[str, Any], models: Mapping[str, Any]) -> None:
         """
-        DIOL/UOF HRL 프레임워크를 위해 고수준/저수준 에이전트를 각각 생성하고,
-        'self.high_level_agent'와 'self.low_level_agent'에 저장
+            DIOL/UOF HRL 프레임워크를 위해 고수준/저수준 에이전트를 각각 생성하고,
+            'self.high_level_agent'와 'self.low_level_agent'에 저장
         """
         agents = {
             "high_level": None,
@@ -112,17 +89,16 @@ class AISLDIOLRunner(Runner):
         self.low_level_agent = None
         
         agent_cfg = copy.deepcopy(cfg.get("agent", {}))
-        agent_cfg.update(self._process_cfg(agent_cfg))
         memory_cfg = copy.deepcopy(cfg.get("memory", {}))
         
-        # --- High-Level 에이전트 (DIOLAgent) 생성 ---
-        print("[AISLRunner] Instantiating high-level agent (DIOLAgent)...")
-        agent_cfg_high = agent_cfg.get("high_level", {})
+        # --- High-Level 에이전트 생성 ---
+        print("[AISLRunner] Instantiating high-level agent ...")
+        high_level_observation_space = env._unwrapped.single_observation_space_h["policy"]
+        high_level_action_space = env._unwrapped.single_action_space_h
+
+        agent_cfg_high = self._process_cfg(cfg["agent"]["high_level"])
         memory_cfg_high = memory_cfg.get("high_level", {})
         models_high = models.get("high_level", {})
-
-        high_level_observation_space = models_high["q_network"].observation_space
-        high_level_action_space = models_high["q_network"].action_space
 
         if agent_cfg_high and models_high:
             # 고수준 메모리(리플레이 버퍼) 생성
@@ -136,58 +112,72 @@ class AISLDIOLRunner(Runner):
             {"size": high_level_observation_space, "device": env.device})
 
             # 커스텀 DIOLAgent 클래스 인스턴스화
-            self.high_level_agent = DIOLAgent(models=models_high,
-                                              memory=memory_high,
-                                              observation_space=high_level_observation_space,
-                                              action_space=high_level_action_space,
-                                              device=env.device,
-                                              cfg=agent_cfg_high)
+            self.high_level_agent = HybridActorCriticAgent(models=models_high,
+                                                           memory=memory_high,
+                                                           observation_space=high_level_observation_space,
+                                                           action_space=high_level_action_space,
+                                                           device=env.device,
+                                                           cfg=agent_cfg_high)
             print("  - Instantiated high-level agent: DIOLAgent")
         
         else:
             raise ValueError("Configuration for high-level agent is incomplete or missing. Please check 'high_level' flag in the configuration.")
 
-
         # --- Low-Level 에이전트 생성 ---
-        print("[AISLRunner] Instantiating low-level agent (DDPG Agent)...")
+        print("[AISLRunner] Instantiating low-level agent...")
+        low_level_observation_space = env._unwrapped.single_observation_space["policy"]
+        low_level_action_space = env._unwrapped.single_action_space
+
         agent_cfg_low = agent_cfg.get("low_level", {})
         memory_cfg_low = memory_cfg.get("low_level", {})
-        models_low = models.get("low_level", {})
-
-        low_level_observation_space = env._unwrapped.observation_space
-        low_level_action_space = env._unwrapped.action_space
-
-        if agent_cfg_low and memory_cfg_low and models_low:
-            # 저수준 메모리(리플레이 버퍼) 생성
-            memory_low = LowLevelHindSightReplayBuffer(memory_size=memory_cfg_low.get("memory_size"),
-                                                       device=env.device)
-            
-            # preprocessor 설정
-            if agent_cfg_low.get("state_preprocessor_kwargs") is None:
-                agent_cfg_low["state_preprocessor_kwargs"] = {}
-
-            agent_cfg_low["state_preprocessor_kwargs"].update(
-                {"policy": {
-                    "size": low_level_observation_space["policy"], "device": env.device
-                    },
-                 "critic": {
-                    "size": low_level_observation_space["critic"], "device": env.device
-                    }
-                }
-            )
-
-            # skrl의 DDPG 에이전트 인스턴스화
-            self.low_level_agent = DDPGAgent(models=models_low,
-                                             memory=memory_low,
-                                             observation_space=low_level_observation_space,
-                                             action_space=low_level_action_space,
-                                             device=env.device,
-                                             cfg=agent_cfg_low)
-            
-            print("  - Instantiated low-level agent: DDPG")
+        models_low = models["low_level"]
         
-        else:
-            raise ValueError("Configuration for low-level agent is incomplete or missing. Please check 'low_level' flag in the configuration.")
+        agent_class = agent_cfg_low.get("class", "").lower()
+        if not agent_class:
+            raise ValueError(f"No 'class' field defined in 'agent' cfg")
+        del agent_cfg_low["class"]
+        # check for memory configuration (backward compatibility)
+        if memory_cfg_low:
+            memory_cfg_low = {"class": "RandomMemory", "memory_size": -1}
+        # get memory class and remove 'class' field
+        try:
+            memory_class = self._component(memory_cfg_low["class"])
+            del memory_cfg_low["class"]
+        except KeyError:
+            memory_class = self._component("RandomMemory")
+            print("No 'class' field defined in 'memory' cfg. 'RandomMemory' will be used as default")
+        # instantiate memory
+        if memory_cfg_low["memory_size"] < 0:
+            memory_cfg_low["memory_size"] = agent_cfg_low["rollouts"]  # memory_size is the agent's number of rollouts
+        memory_low = memory_class(num_envs=env.num_envs, device=env.device, **self._process_cfg(memory_cfg_low))
+
+        # agent 생성
+        agent_cfg_low = self._component(f"{agent_class}_DEFAULT_CONFIG").copy()
+        agent_cfg_low["use_pre_trained"] = False
+        agent_cfg_low["checkpoint_path"] = ''
+        agent_cfg_low.update(self._process_cfg(agent_cfg_low))
+        agent_cfg_low.get("state_preprocessor_kwargs", {}).update(
+            {"size": low_level_observation_space, "device": env.device}
+        )
+        agent_cfg_low.get("value_preprocessor_kwargs", {}).update({"size": 1, "device": env.device})
+        if agent_cfg_low.get("exploration", {}).get("noise", None):
+            agent_cfg_low["exploration"].get("noise_kwargs", {}).update({"device": env.device})
+            agent_cfg_low["exploration"]["noise"] = agent_cfg_low["exploration"]["noise"](
+                **agent_cfg_low["exploration"].get("noise_kwargs", {})
+            )
+        if agent_cfg_low.get("smooth_regularization_noise", None):
+            agent_cfg_low.get("smooth_regularization_noise_kwargs", {}).update({"device": env.device})
+            agent_cfg_low["smooth_regularization_noise"] = agent_cfg_low["smooth_regularization_noise"](
+                **agent_cfg_low.get("smooth_regularization_noise_kwargs", {})
+            )
+        agent_kwargs = {
+            "models": models_low,
+            "memory": memory_low,
+            "observation_space": low_level_observation_space,
+            "action_space": low_level_action_space,
+        }
+
+        self.low_level_agent = self._component(agent_class)(cfg=agent_cfg_low, device=env.device, **agent_kwargs)
         
         agents["high_level"] = self.high_level_agent
         agents["low_level"] = self.low_level_agent

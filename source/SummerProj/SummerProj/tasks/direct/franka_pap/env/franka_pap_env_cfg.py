@@ -13,9 +13,10 @@ from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.utils import configclass
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.scene import InteractiveSceneCfg
 
 from ..base.franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
-from ..task_tables.pap_task_table import FrankaPapAction
+
 
 
 @configclass
@@ -25,10 +26,19 @@ class FrankaPapEnvCfg(FrankaBaseDIOLEnvCfg):
     decimation = 10
     action_space = 21
     observation_space = 39
-    state_space = 0
+    
+    high_level_action_space = {
+        "where": 5,
+        "how": 3
+    }
+    high_level_observation_space = 10
 
-    high_level_goal_dim = 14
-    high_level_action_dim = len(FrankaPapAction)
+    low_level_action_space = 21
+    low_level_observation_space = 39
+
+
+    # high_level_goal_dim = 14
+    # high_level_action_dim = len(FrankaPapAction)
 
 
     # === HRL Mapping Constants ===
@@ -37,6 +47,9 @@ class FrankaPapEnvCfg(FrankaBaseDIOLEnvCfg):
     # Gripper states
     gripper_open_joint: float = 0.04
     gripper_close_joint: float = 0.00
+
+    # scene
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=16, env_spacing=3.0, replicate_physics=False)
 
     # simulation
     sim: SimulationCfg = SimulationCfg(

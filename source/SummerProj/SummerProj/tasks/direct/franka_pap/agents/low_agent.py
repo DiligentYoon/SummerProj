@@ -85,6 +85,10 @@ class DDPGAgent(Agent):
             cfg=_cfg,
         )
 
+        # pre-trained
+        self.use_pre_trained_model = self.cfg.get("use_pre_trained", False)
+        self.checkpoint_path      = self.cfg.get("checkpoint_path", "")
+
         # models
         self.policy = self.models.get("policy", None)
         self.critic = {
@@ -159,16 +163,18 @@ class DDPGAgent(Agent):
         
         self.critic_optimizer = {}
         self.critic_scheduler = {}
-        for k, v in self.critic.items():
-            if v is not None:
-                self.critic_optimizer[k] = torch.optim.Adam(v.parameters(), lr=self._critic_learning_rate)
-                if self._learning_rate_scheduler is not None:
-                    self.critic_scheduler[k] = self._learning_rate_scheduler(
-                        self.critic_optimizer[k], **self.cfg["learning_rate_scheduler_kwargs"]
-                    )
+        if not self.use_pre_trained_model:
+            for k, v in self.critic.items():
+                if v is not None:
+                    self.critic_optimizer[k] = torch.optim.Adam(v.parameters(), lr=self._critic_learning_rate)
+                    if self._learning_rate_scheduler is not None:
+                        self.critic_scheduler[k] = self._learning_rate_scheduler(
+                            self.critic_optimizer[k], **self.cfg["learning_rate_scheduler_kwargs"]
+                        )
 
-        self.checkpoint_modules["policy_optimizer"] = self.policy_optimizer
-        self.checkpoint_modules["critic_optimizer"] = self.critic_optimizer
+            self.checkpoint_modules["policy_optimizer"] = self.policy_optimizer
+            self.checkpoint_modules["critic_optimizer"] = self.critic_optimizer
+            
 
         # set up preprocessors
         if self._state_preprocessor:
@@ -184,9 +190,8 @@ class DDPGAgent(Agent):
         self._state_preprocessor = {
             "policy": _policy_state_preprocessor,
             "critic": _critic_state_preprocessor}
-    
-        self._tensors_names = []
 
+        self._tensors_names = []
 
 
     def init(self, trainer_cfg: Optional[Mapping[str, Any]] = None) -> None:
@@ -194,19 +199,34 @@ class DDPGAgent(Agent):
         super().init(trainer_cfg=trainer_cfg)
         self.set_mode("eval")
 
-        # create tensors in memory
-        if self.memory is not None:
-            self.memory.create_tensor(name="states", size=self.observation_space["policy"], dtype=torch.float32)
-            self.memory.create_tensor(name="next_states", size=self.observation_space["policy"], dtype=torch.float32)
-            self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.float32)
-            self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32)
-            self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool)
-            self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool)
+        if not self.use_pre_trained_model:
+            # create tensors in memory
+            if self.memory is not None:
+                self.memory.create_tensor(name="states", size=self.observation_space["policy"], dtype=torch.float32)
+                self.memory.create_tensor(name="next_states", size=self.observation_space["policy"], dtype=torch.float32)
+                self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.float32)
+                self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32)
+                self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool)
+                self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool)
 
-        # clip noise bounds
-        if self.action_space is not None:
-            self.clip_actions_min = torch.tensor(self.action_space.low, device=self.device)
-            self.clip_actions_max = torch.tensor(self.action_space.high, device=self.device)
+            # clip noise bounds
+            if self.action_space is not None:
+                self.clip_actions_min = torch.tensor(self.action_space.low, device=self.device)
+                self.clip_actions_max = torch.tensor(self.action_space.high, device=self.device)
+        else:
+            # 가중치 로드
+            state = torch.load(self.checkpoint_path, map_location=self.device)
+            self.policy.load_state_dict(state["policy"])
+            for k in ["critic_1", "critic_2"]:
+                if k in state:
+                    self.critic[k].load_state_dict(state[k])
+
+            # 파라미터 동결
+            for p in self.policy.parameters():
+                p.requires_grad_(False)
+            for c in self.critic.values():
+                for p in c.parameters():
+                    p.requires_grad_(False)
     
 
     def act(self, states: torch.Tensor, timestep: int, timesteps: int) -> torch.Tensor:
@@ -242,6 +262,9 @@ class DDPGAgent(Agent):
         timestep: int,
         timesteps: int,
     ) -> None:
+        
+        if self.use_pre_trained_model:
+            return
         
         super().record_transition(
             states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps
@@ -289,6 +312,9 @@ class DDPGAgent(Agent):
 
     
     def _update(self, timestep, timesteps):
+
+        if self.use_pre_trained_model:
+            return {}
         
         # gradient steps
         for gradient_step in range(self._gradient_steps):

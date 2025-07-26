@@ -5,54 +5,71 @@
 
 from __future__ import annotations
 
-import builtins
-import omni.log
-from dataclasses import MISSING
 import gymnasium as gym
-import numpy as np
 import torch
-from abc import abstractmethod
 
+from abc import abstractmethod
 from isaaclab.envs.direct_rl_env import DirectRLEnv
 from isaaclab.envs.utils.spaces import sample_space, spec_to_gym_space
+from isaaclab.envs.common import VecEnvObs, VecEnvStepReturn
 from .direct_diol_env_cfg import DirectDIOLCfg
 
-class DirectDIOL(DirectRLEnv):
-    """
-        DirectDIOL is a class that extends the DirectRLEnv class to provide hierarchical reinforcement learning capabilities.
-    """
-    cfg: DirectDIOLCfg
-    def __init__(self, cfg: DirectDIOLCfg, render_mode: str | None = None, **kwargs):
-        """
-        Initialize the DirectDIOL environment with the given configuration.
 
-        Args:
-            cfg (DirectDIOLCfg): Configuration for the environment.
-            **kwargs: Additional keyword arguments.
-        """
+class DirectDIOL(DirectRLEnv):
+
+    def __init__(self, cfg: DirectDIOLCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
-        # HRL 관련 버퍼 초기화 (저 수준 목표 및 고 수준 최종 목표)
-        self.reward_buf = -1.0 * torch.ones(self.num_envs, dtype=torch.float, device=self.device)
-        print("[INFO] DirectDIOL: Hierarchical RL Environment Manger Initialized.")
 
     def _configure_gym_env_spaces(self):
-
-        # ============== Environment Agent (Low-Level) spaces ===============
         # set up spaces
-        self.single_action_space = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.action_space,))
-        self.single_observation_space = gym.spaces.Dict()
-        self.single_observation_space["policy"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space + self.cfg.low_level_goal_dim,))
-        self.single_observation_space["critic"] = gym.spaces.Box(low=-torch.inf, high=torch.inf, shape=(self.cfg.observation_space + self.cfg.low_level_goal_dim + self.cfg.action_space,))
+        if type(self.cfg.high_level_action_space["where"]) == int:
+            self.cfg.high_level_action_space["where"] = {self.cfg.high_level_action_space["where"]}
+        self.single_observation_space_h = gym.spaces.Dict()
+        self.single_observation_space_h["policy"] = spec_to_gym_space(self.cfg.high_level_observation_space)
+        self.single_action_space_h = spec_to_gym_space(self.cfg.high_level_action_space)
 
-        # set up batched spaces
-        self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, self.num_envs)
-        self.action_space = gym.vector.utils.batch_space(self.single_action_space, self.num_envs)
-        self.state_space = gym.vector.utils.batch_space(self.single_observation_space["critic"], self.num_envs)
+        self.single_observation_space_l = gym.spaces.Dict()
+        self.single_observation_space_l["policy"] = spec_to_gym_space(self.cfg.low_level_observation_space)
+        self.single_action_space_l = spec_to_gym_space(self.cfg.low_level_action_space)
 
-        self.actions = sample_space(self.single_action_space, self.sim.device, batch_size=self.num_envs, fill_value=0)
+        # batch the spaces for vectorized environments
+        self.observation_space_h = gym.vector.utils.batch_space(self.single_observation_space_h["policy"], self.num_envs)
+        self.action_space_h = gym.vector.utils.batch_space(self.single_action_space_h, self.num_envs)
+
+        self.observation_space_l = gym.vector.utils.batch_space(self.single_observation_space_l["policy"], self.num_envs)
+        self.action_space_l = gym.vector.utils.batch_space(self.single_action_space_l, self.num_envs)
+
+        # optional state space for asymmetric actor-critic architectures
+        self.state_space = None
+        self.state_space_h = None
+        self.state_space_l = None
+        if self.cfg.state_space:
+            self.single_observation_space_h["value"] = spec_to_gym_space(self.cfg.high_level_state_space)
+            self.state_space_h = gym.vector.utils.batch_space(self.single_observation_space_h["value"], self.num_envs)
+            self.single_observation_space_l["value"] = spec_to_gym_space(self.cfg.low_level_state_space)
+            self.state_space_l = gym.vector.utils.batch_space(self.single_observation_space_l["value"], self.num_envs)
+
+        # instantiate actions (needed for tasks for which the observations computation is dependent on the actions)
+        self.actions_h = sample_space(self.single_action_space_h, self.sim.device, batch_size=self.num_envs, fill_value=0)
+        self.actions_l = sample_space(self.single_action_space_l, self.sim.device, batch_size=self.num_envs, fill_value=0)
 
 
-    def _reset_idx(self, env_ids) -> None:
-        super()._reset_idx(env_ids)
-        self.reward_buf[env_ids] = -1.0
+        # 환경과 직접 상호작용 하는 에이전트는 Low-Level Agent
+        self.single_observation_space = self.single_observation_space_l
+        self.single_action_space = self.single_action_space_l
+        self.observation_space = self.observation_space_l
+        self.action_space = self.action_space_l
+        self.state_space = self.state_space_l
+
+    @abstractmethod
+    def _get_high_reward(self) -> torch.Tensor:
+        raise NotImplementedError(f"Please implement the '_get_high_reward' method for {self.__class__.__name__}.")
+
+    @abstractmethod
+    def _apply_high_action(self) -> None:
+        raise NotImplementedError(f"Please implement the '_apply_high_action' method for {self.__class__.__name__}.")
+    
+    @abstractmethod
+    def _set_extra_infos(self) -> None:
+        raise NotImplementedError(f"Please implement the '_set_extra_infos' method for {self.__class__.__name__}.")

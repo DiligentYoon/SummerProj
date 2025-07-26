@@ -142,14 +142,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        # self.is_reach = torch.logical_and(self.loc_error < 1e-2, self.rot_error < 1e-1)
+        self.is_reach = torch.logical_and(self.loc_error < 1e-2, self.rot_error < 1e-1)
         truncated = self.episode_length_buf >= self.max_episode_length - 1
-        terminated = truncated
+        terminated = self.is_reach
         return terminated, truncated
         
     def _get_rewards(self):
         # Action Penalty
-        # action_norm = torch.norm(self.actions[:, 7:14], dim=1)
+        action_norm = torch.norm(self.actions[:, 7:14], dim=1)
 
         # # =========== Approach Reward (1): Potential Based Reward Shaping =============
         # # gamma = 1.0
@@ -162,32 +162,32 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # # r_pos = gamma*phi_s_prime - phi_s 
         # # r_rot = gamma*phi_s_prime_rot - phi_s_rot
 
-        # # =========== Approach Reward (1-1): Potential Based Reward Shaping by log scale =============
-        # gamma = 1.0
-        # phi_s_prime = -torch.log(self.cfg.alpha * self.loc_error + 1)
-        # phi_s = -torch.log(self.cfg.alpha * self.prev_loc_error + 1)
+        # =========== Approach Reward (1-1): Potential Based Reward Shaping by log scale =============
+        gamma = 1.0
+        phi_s_prime = -torch.log(self.cfg.alpha * self.loc_error + 1)
+        phi_s = -torch.log(self.cfg.alpha * self.prev_loc_error + 1)
 
-        # phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
-        # phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
+        phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
+        phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
 
-        # r_pos = gamma*phi_s_prime - phi_s 
-        # r_rot = gamma*phi_s_prime_rot - phi_s_rot
+        r_pos = gamma*phi_s_prime - phi_s 
+        r_rot = gamma*phi_s_prime_rot - phi_s_rot
 
-        # # =========== Success Reward : Goal Reach ============
-        # r_success = self.is_reach.float()
+        # =========== Success Reward : Goal Reach ============
+        r_success = self.is_reach.float()
 
-        # # =========== Contact Penalty =================
-        # p_contact = torch.norm(self._object.data.root_vel_w, dim=1)
+        # =========== Contact Penalty =================
+        p_contact = torch.norm(self._object.data.root_vel_w, dim=1)
         
-        # # =========== Summation =============
-        # reward = self.cfg.w_pos * r_pos + \
-        #          self.cfg.w_rot * r_rot - \
-        #          self.cfg.w_penalty * action_norm - \
-        #          self.cfg.w_contact * p_contact + \
-        #          self.cfg.w_success * r_success
+        # =========== Summation =============
+        reward = self.cfg.w_pos * r_pos + \
+                 self.cfg.w_rot * r_rot - \
+                 self.cfg.w_penalty * action_norm - \
+                 self.cfg.w_contact * p_contact + \
+                 self.cfg.w_success * r_success
 
-        # # print(f"reward of env1 : {reward[0]}")
-        # # print(f"--------------------------------------")
+        # print(f"reward of env1 : {reward[0]}")
+        # print(f"--------------------------------------")
         reward = -1 * torch.ones((self.num_envs, 1), device=self.device)
 
         return reward
