@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import gymnasium as gym
 from gymnasium import spaces
+from packaging import version
 
 from skrl.agents.torch import Agent
 from skrl.models.torch import Model
@@ -65,6 +66,7 @@ class HybridActorCriticAgent(Agent):
                  memory: HighLevelHindSightReplayBuffer,
                  observation_space: gym.Space,
                  action_space: gym.Space,
+                 goal_sapce: gym.Space | None,
                  device: Union[str, torch.device],
                  cfg: Mapping[str, Any]) -> None:
         
@@ -88,6 +90,10 @@ class HybridActorCriticAgent(Agent):
             "target_value_1": self.models.get("target_value_1"),
             "target_value_2": self.models.get("target_value_2")
         }
+
+        # goal space
+        if goal_sapce is not None: 
+            self.goal_space = goal_sapce
 
         # checkpoint models
         self.checkpoint_modules["policy"] = self.policy
@@ -133,6 +139,13 @@ class HybridActorCriticAgent(Agent):
 
         self._mixed_precision = self.cfg["mixed_precision"]
 
+        # set up automatic mixed precision
+        self._device_type = torch.device(device).type
+        if version.parse(torch.__version__) >= version.parse("2.4"):
+            self.scaler = torch.amp.GradScaler(device=self._device_type, enabled=self._mixed_precision)
+        else:
+            self.scaler = torch.cuda.amp.GradScaler(enabled=self._mixed_precision)
+
         # set up optimizers and learning rate schedulers
         if self.policy is not None and self.value is not None:
             self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=self._learning_rate)
@@ -172,13 +185,14 @@ class HybridActorCriticAgent(Agent):
         if not self.use_pre_trained_model:
             # create tensors in memory
             if self.memory is not None:
-                self.memory.create_tensor(name="states", size=self.observation_space, dtype=torch.float32)
-                self.memory.create_tensor(name="next_states", size=self.observation_space, dtype=torch.float32)
-                self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.float32)
-                self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32)
-                self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool)
-                self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool)
-                self.memory.create_tensor(name="desired_goal", size=1, dtype=torch.bool)
+                # desired goal : object goal flow + TCP state
+                self.memory.create_tensor(name="states", size=self.observation_space, dtype=torch.float32, keep_dimensions=True)
+                self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.float32, keep_dimensions=True)
+                self.memory.create_tensor(name="next_states", size=self.observation_space, dtype=torch.float32, keep_dimensions=True)
+                self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32, keep_dimensions=False)
+                self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool, keep_dimensions=False)
+                self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool, keep_dimensions=False)
+                self.memory.create_tensor(name="desired_goal", size=self.goal_space, dtype=torch.bool, keep_dimensions=True)
 
             # clip noise bounds
             self.clip_actions_min = {}
@@ -186,13 +200,14 @@ class HybridActorCriticAgent(Agent):
             if self.action_space is not None:
                 if isinstance(self.action_space, spaces.Dict):
                     for key, value in self.action_space.items():
-                        if isinstance(self.action_space, spaces.Box):
+                        if isinstance(value, spaces.Box):
                             self.clip_actions_min[key] = torch.tensor(value.low, device=self.device)
                             self.clip_actions_max[key] = torch.tensor(value.high, device=self.device)
                         else:
                             self.clip_actions_min[key] = None
                             self.clip_actions_max[key] = None
         else:
+            self.memory = None
             self.set_running_mode("eval")
 
 
@@ -283,42 +298,33 @@ class HybridActorCriticAgent(Agent):
                           terminated: torch.Tensor,
                           truncated: torch.Tensor,
                           infos: dict,
-                          **kwargs) -> None:
+                          timestep: int,
+                          timesteps: int,
+                          ) -> None:
         """
-            HRL을 위한 특별한 전환(transition)을 메모리에 기록
+            High-Level의 원본 데이터로부터 로깅 및 버퍼 기록을 수행
+            증강 데이터 로직은 외부에서 수행
         """
-        if self.write_interval > 0:
-            # compute the cumulative sum of the rewards and timesteps
-            if self._cumulative_rewards is None:
-                self._cumulative_rewards = torch.zeros_like(rewards, dtype=torch.float32)
-                self._cumulative_timesteps = torch.zeros_like(rewards, dtype=torch.int32)
+        # Tensorboard 데이터 로깅을 위해 데이터 Tracking
+        super().record_transition(
+            states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps
+        )
 
-            self._cumulative_rewards.add_(rewards)
-            self._cumulative_timesteps.add_(1)
-
-            # check ended episodes : 반드시 High-Level 기준으로 측정
-            finished_episodes = (terminated + truncated).nonzero(as_tuple=False)
-            if finished_episodes.numel():
-
-                # storage cumulative rewards and timesteps
-                self._track_rewards.extend(self._cumulative_rewards[finished_episodes][:, 0].reshape(-1).tolist())
-                self._track_timesteps.extend(self._cumulative_timesteps[finished_episodes][:, 0].reshape(-1).tolist())
-
-                # reset the cumulative rewards and timesteps
-                self._cumulative_rewards[finished_episodes] = 0
-                self._cumulative_timesteps[finished_episodes] = 0
-
-                # record reward data
-                self.tracking_data["[High] Reward / Instantaneous reward (max)"].append(torch.max(rewards).item())
-                self.tracking_data["[High] Reward / Instantaneous reward (min)"].append(torch.min(rewards).item())
-                self.tracking_data["[High] Reward / Instantaneous reward (mean)"].append(torch.mean(rewards).item())
-
-                if len(self._track_rewards):
-                    track_rewards = np.array(self._track_rewards)
-
-                    self.tracking_data["[High] Reward / Total reward (max)"].append(np.max(track_rewards))
-                    self.tracking_data["[High] Reward / Total reward (min)"].append(np.min(track_rewards))
-                    self.tracking_data["[High] Reward / Total reward (mean)"].append(np.mean(track_rewards))
+        if self.memory is not None:
+            # reward shaping
+            if self._rewards_shaper is not None:
+                rewards = self._rewards_shaper(rewards, timestep, timesteps)
+            
+            # strage trasition in memory
+            self.memory.add_samples(
+                    states=states,
+                    actions=actions,
+                    rewards=rewards,
+                    next_states=next_states,
+                    terminated=terminated,
+                    truncated=truncated,
+                    desired_goal=infos["desired_goal"]
+                )
 
 
     def _update(self, timestep: int, timesteps: int) -> None:
@@ -342,8 +348,7 @@ class HybridActorCriticAgent(Agent):
                 sampled_truncated,
             ) = self.memory.sample(names=self._tensors_names, batch_size=self._batch_size)[0]
 
-            with torch.autocast(device_type=self._device_type, enabled=self._mixed_precision):
-
+            with torch.autocast(device_type=self.device, enabled=self._mixed_precision):
                 sampled_states = self._state_preprocessor(sampled_states, train=True)
                 sampled_next_states = self._state_preprocessor(sampled_next_states, train=True)
 

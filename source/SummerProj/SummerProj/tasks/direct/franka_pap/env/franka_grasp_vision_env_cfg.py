@@ -31,12 +31,16 @@ class FrankaGraspVisionEnvCfg(FrankaVisionBaseCfg):
     state_space = 0
 
 
-    high_level_observation_space = [num_obj_points, num_feature]
+    high_level_observation_space = [num_obj_points + num_bg_points, num_feature]
     high_level_action_space = {
-        "where": num_obj_points,
+        "where": num_obj_points + num_bg_points,
         "how": 3
     }
     high_level_state_space = 0
+    high_level_goal_space = {
+        "obj_state" : [num_obj_points, 3],
+        "tcp_state" : 3 
+    }
 
     low_level_observation_space = 39
     low_level_action_space = 21

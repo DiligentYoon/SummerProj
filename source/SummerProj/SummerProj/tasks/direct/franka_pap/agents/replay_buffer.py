@@ -2,7 +2,7 @@ import torch
 import gymnasium
 from typing import List, Optional, Tuple, Union
 from skrl.memories.torch.base import Memory
-from copy import deepcopy as dcp
+from skrl.utils.spaces.torch import compute_space_size
 
 
 class EpisodeWiseReplayBuffer(Memory):
@@ -24,17 +24,17 @@ class EpisodeWiseReplayBuffer(Memory):
 
     def add_samples(self, 
                     states: torch.Tensor, 
-                    sub_goal: torch.Tensor, 
                     action: torch.Tensor, 
                     reward: torch.Tensor, 
-                    achieved_goal: torch.Tensor, 
                     next_states: torch.Tensor, 
                     terminated: torch.Tensor, 
-                    truncated: torch.Tensor) -> None:
+                    truncated: torch.Tensor,
+                    achieved_goal: torch.Tensor,
+                    desired_goal: torch.Tensor) -> None:
         """
             입력 텐서들의 shape: (num_envs, feature_dim)
         """
-        # shape: (num_envs,)
+        # (num_envs,)
         current_indices = self.memory_index
         
         # 병렬 환경의 인덱스를 나타내는 텐서를 생성합니다 (0, 1, 2, ..., num_envs-1)
@@ -43,13 +43,13 @@ class EpisodeWiseReplayBuffer(Memory):
         # 각 텐서의 (쓰기_인덱스, 환경_인덱스) 위치에 데이터를 저장합니다.
         # 예: self.tensors["states"]의 [0, 0] 위치에 0번 환경의 0번째 스텝 데이터 저장
         self.tensors["states"][current_indices, env_indices] = states
-        self.tensors["sub_goal"][current_indices, env_indices] = sub_goal
         self.tensors["action"][current_indices, env_indices] = action
         self.tensors["reward"][current_indices, env_indices] = reward
-        self.tensors["achieved_goal"][current_indices, env_indices] = achieved_goal
         self.tensors["next_states"][current_indices, env_indices] = next_states
         self.tensors["terminated"][current_indices, env_indices] = terminated
         self.tensors["truncated"][current_indices, env_indices] = truncated
+        self.tensors["desired_goal"][current_indices, env_indices] = desired_goal
+        self.tensors["achieved_goal"][current_indices, env_indices] = achieved_goal
 
         # 다음 데이터를 저장하기 위해 메모리 인덱스를 1 증가시킵니다.
         self.memory_index += 1
@@ -85,14 +85,82 @@ class HighLevelHindSightReplayBuffer(Memory):
                          export_format=export_format, 
                          export_directory=export_directory)
 
+        self.replacement = True
         self.k = k_num
         self.strategy = strategy
+
+
+    def create_tensor(
+        self,
+        name: str,
+        size: Union[int, Tuple[int], gymnasium.Space],
+        dtype: Optional[torch.dtype] = None,
+        keep_dimensions: bool = False,
+    ) -> bool:
+        
+        if keep_dimensions and isinstance(size, gymnasium.spaces.Dict):
+            # Dict 스페이스의 경우, 각 하위 스페이스에 대해 재귀적으로 create_tensor 호출
+            for key, space in size.spaces.items():
+                # 텐서 이름을 조합하여 생성 (예: "states" -> "states_pos", "states_x")
+                self.create_tensor(f"{name}_{key}", space, dtype, keep_dimensions)
+            # Dict 자체에 대한 텐서는 생성하지 않으므로 여기서 함수 종료
+            return True
+
+        # skrl의 기본 로직과 거의 동일하지만, tensor_shape를 만드는 부분을 수정  
+        # compute_space_size는 그대로 사용하여 gym.space를 숫자 형태로 변환
+        # 단, keep_dimensions=True일 때는 이 결과값을 사용하지 않음
+        flat_size = compute_space_size(size, occupied_size=True)
+        
+        # check dtype and size if the tensor exists
+        if name in self.tensors:
+            expected_shape = None
+            if self.tensors_keep_dimensions[name] and isinstance(size, (tuple, list, gymnasium.spaces.Box)):
+                shape_tuple = size.shape if hasattr(size, 'shape') else size
+                expected_shape = tuple(shape_tuple)
+            else:
+                flat_size = compute_space_size(size, occupied_size=True)
+                expected_shape = (flat_size,)
+
+            #    (memory_size, num_envs, *data_shape) 이므로 앞의 2개 차원을 제외.
+            existing_shape = self.tensors[name].shape[2:]
+            
+            if existing_shape != expected_shape:
+                raise ValueError(f"Shape of tensor '{name}' ({expected_shape}) doesn't match the existing one ({existing_shape})")
+            
+            if dtype is not None and self.tensors[name].dtype != dtype:
+                raise ValueError(f"Dtype of tensor '{name}' ({dtype}) doesn't match the existing one ({self.tensors[name].dtype})")
+            
+            return False
+        
+        if keep_dimensions and isinstance(size, (tuple, list, gymnasium.spaces.Box)):
+            # size가 tuple, list, 또는 Box space일 경우, 그 shape을 그대로 사용
+            shape = size.shape if hasattr(size, 'shape') else size
+            tensor_shape = (self.memory_size, self.num_envs, *shape)
+            view_shape = (-1, *shape)
+        else:
+            # 그 외의 경우 (또는 keep_dimensions=False), 기존 로직대로 flatten
+            tensor_shape = (self.memory_size, self.num_envs, flat_size)
+            view_shape = (-1, flat_size)
+        
+        # create tensor (_tensor_<name>) and add it to the internal storage
+        setattr(self, f"_tensor_{name}", torch.zeros(tensor_shape, device=self.device, dtype=dtype))
+        # update internal variables
+        self.tensors[name] = getattr(self, f"_tensor_{name}")
+        self.tensors_view[name] = self.tensors[name].view(*view_shape)
+        self.tensors_keep_dimensions[name] = keep_dimensions
+        # fill the tensors (float tensors) with NaN
+        for tensor in self.tensors.values():
+            if torch.is_floating_point(tensor):
+                tensor.fill_(float("nan"))
+        return True
+
+
     
     def add_samples(self, **tensors):
-        # 현재 배치 크기 확인
+        # (E, k) -> we need to know Env Dimension
         batch_size = next(iter(tensors.values())).shape[0]
         
-        # 남은 공간 계산
+        # Compute residual sapce
         space_left = self.memory_size - self.memory_index
         
         # 한 번에 추가할 수 있는 양과, 순환하여 추가할 양으로 나눔
@@ -102,8 +170,10 @@ class HighLevelHindSightReplayBuffer(Memory):
         # ======= 버퍼에 데이터 복사 ========
         for name, tensor in tensors.items():
             if name in self.tensors:
-                # 버퍼의 남은 공간에 데이터 채우기
-                #    (batch_size, feat) -> (batch_size, 1, feat)로 unsqueeze하여 저장
+                # (batch_size, feat) -> (batch_size, 1, feat)로 unsqueeze하여 저장
+                if len(tensor.shape) == 1:
+                    tensor = tensor.unsqueeze(-1)
+
                 self.tensors[name][self.memory_index : self.memory_index + fit_size] = tensor[:fit_size].unsqueeze(1)
 
                 # 버퍼 용량을 넘는 데이터는 처음부터 덮어쓰기 (Queue형 버퍼)
@@ -117,7 +187,7 @@ class HighLevelHindSightReplayBuffer(Memory):
     
     def sample(self, batch_size: int, names: list[str]) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
-        버퍼에서 무작위로 transition 배치를 샘플링
+        버퍼에서 Random으로 transition 배치를 샘플링
         
         :param batch_size: 샘플링할 배치의 크기
         :param names: 샘플링할 텐서의 이름 리스트
@@ -129,7 +199,10 @@ class HighLevelHindSightReplayBuffer(Memory):
             return [torch.empty(0) for _ in names], torch.empty(0)
             
         # batch_size 만큼의 랜덤 인덱스 생성
-        indexes = torch.randint(0, max_index, (batch_size,), device=self.device)
+        if self.replacement:
+            indexes = torch.randint(0, max_index, (batch_size,), device=self.device)
+        else:
+            indexes = torch.randperm(max_index, dtype=torch.long, device=self.device)[:batch_size]
         
         # 해당 인덱스의 데이터를 가져와서 리스트에 담음
         sampled_tensors = []

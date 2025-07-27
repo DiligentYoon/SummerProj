@@ -95,6 +95,7 @@ class AISLDIOLRunner(Runner):
         print("[AISLRunner] Instantiating high-level agent ...")
         high_level_observation_space = env._unwrapped.single_observation_space_h["policy"]
         high_level_action_space = env._unwrapped.single_action_space_h
+        high_level_goal_space = env._unwrapped.single_goal_space
 
         agent_cfg_high = self._process_cfg(cfg["agent"]["high_level"])
         memory_cfg_high = memory_cfg.get("high_level", {})
@@ -116,6 +117,7 @@ class AISLDIOLRunner(Runner):
                                                            memory=memory_high,
                                                            observation_space=high_level_observation_space,
                                                            action_space=high_level_action_space,
+                                                           goal_sapce=high_level_goal_space,
                                                            device=env.device,
                                                            cfg=agent_cfg_high)
             print("  - Instantiated high-level agent: DIOLAgent")

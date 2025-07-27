@@ -50,6 +50,16 @@ class DirectDIOL(DirectRLEnv):
             self.single_observation_space_l["value"] = spec_to_gym_space(self.cfg.low_level_state_space)
             self.state_space_l = gym.vector.utils.batch_space(self.single_observation_space_l["value"], self.num_envs)
 
+        # high level goal space
+        try:
+            self.single_goal_space = spec_to_gym_space(self.cfg.high_level_goal_space)
+            self.goal_space = gym.vector.utils.batch_space(self.single_goal_space)
+        except:
+            self.single_goal_space = None
+            self.goal_space = None
+
+
+
         # instantiate actions (needed for tasks for which the observations computation is dependent on the actions)
         self.actions_h = sample_space(self.single_action_space_h, self.sim.device, batch_size=self.num_envs, fill_value=0)
         self.actions_l = sample_space(self.single_action_space_l, self.sim.device, batch_size=self.num_envs, fill_value=0)
