@@ -5,6 +5,8 @@ models:
   high_level:
     policy:
       _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridActorNet
+    target_policy:
+      _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridActorNet
     value_1:
       _target_: SummerProj.tasks.direct.franka_pap.models.custom_hac_net.HybridCriticNet
     target_value_1:
@@ -52,7 +54,7 @@ memory:
 agent:
   # 3-1. 고수준 에이전트 (커스텀 DIOL 에이전트)
   high_level:
-    gradient_steps: 3
+    gradient_steps: 4
     batch_size: 64
 
     discount_factor: 0.99 # 감가율 (gamma)
@@ -68,7 +70,8 @@ agent:
     random_timesteps: 1000 # 초기 랜덤 탐험 스텝
     learning_starts: 1000  # 학습 시작 전 최소 경험 수
 
-    exploration: 
+    exploration:
+        policy_noise: 0.01
         initial_epsilon: 1.0       # initial epsilon for epsilon-greedy exploration
         final_epsilon: 0.01        # final epsilon for epsilon-greedy exploration
         timesteps: 100000           # timesteps for epsilon-greedy decay

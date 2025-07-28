@@ -19,7 +19,7 @@ class HybridActorNet(DeterministicMixin, Model):
             mlp_features (List[int]): Actor 헤드를 구성하는 MLP의 중간 레이어 크기.
         """
         Model.__init__(self, observation_space, action_space, device)
-        DeterministicMixin.__init__(self, clip_actions=False) # 행동 값을 -1~1로 클리핑
+        DeterministicMixin.__init__(self, clip_actions=True) # 행동 값을 -1~1로 클리핑
 
         # Feature Extractor
         self.feature_extractor = PointNet2Segmentation(in_channels=4, 
@@ -27,7 +27,7 @@ class HybridActorNet(DeterministicMixin, Model):
                                                        normalize_pos=True,
                                                        pos_in_feature=False).to(device)
 
-        how_dim = self.action_space['how'].shape[-1]
+        action_dim = self.action_space.shape[-1]
         
         in_features = feature_dim
         layers = []
@@ -35,7 +35,7 @@ class HybridActorNet(DeterministicMixin, Model):
             layers.append(nn.Linear(in_features, out_features))
             layers.append(nn.ReLU())
             in_features = out_features
-        layers.append(nn.Linear(in_features, how_dim))
+        layers.append(nn.Linear(in_features, action_dim))
         self.mlp_head = nn.Sequential(*layers)
 
         self.apply(self._initialize_weights)
@@ -83,7 +83,8 @@ class HybridActorNet(DeterministicMixin, Model):
 class HybridCriticNet(Model):
     def __init__(self, observation_space, action_space, device,
                  feature_dim = 128,
-                 mlp_features: List[int] = [256, 128]):
+                 mlp_features: List[int] = [256, 128],
+                 motion_params_featrues = 3):
         """
         Args:
             observation_space (gym.Space): 관측 공간.
@@ -99,10 +100,11 @@ class HybridCriticNet(Model):
                                                        out_channels=[],
                                                        normalize_pos=True,
                                                        pos_in_feature=False).to(device)
+        
+        self.feature_normalizer = nn.LayerNorm(feature_dim)
 
         # MLP 네트워크 구성
-        action_dim = self.action_space['how'].shape[0]
-        in_features = feature_dim + action_dim
+        in_features = feature_dim + motion_params_featrues
         layers = []
         for out_features in mlp_features:
             layers.append(nn.Linear(in_features, out_features))
@@ -139,10 +141,12 @@ class HybridCriticNet(Model):
         per_point_features_flat = self.feature_extractor(x=x_flat, pos=pos_flat, batch=batch_indices)
         # 원래 형태로 복원: (B, N, 128)
         per_point_features = per_point_features_flat.reshape(batch_size, num_points, -1)
+
+        normalized_features = self.feature_normalizer(per_point_features)
         
         # 3. 모션 파라미터 정보와 피처 벡터를 concat
         # 입력 텐서 형태: (B, N, 128 + action_dim)
-        critic_input = torch.cat([per_point_features, per_point_motions], dim=-1)
+        critic_input = torch.cat([normalized_features, per_point_motions], dim=-1)
 
         # 4. 최종적으로 MLP를 통과시켜 per-point Q-value 얻기
         # 출력 텐서 형태: (B, N, 1) -> 이것이 바로 'Critic Map'

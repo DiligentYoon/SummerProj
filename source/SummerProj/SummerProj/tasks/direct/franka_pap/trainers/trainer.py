@@ -135,8 +135,8 @@ class HRLTrainer(Trainer):
         
         # Main Learning Loop
         for timestep in progress_bar:
-            self.high_level_agent.pre_interaction(timestep=timestep, timesteps=self.timesteps)
-            self.low_level_agent.pre_interaction(timestep=timestep, timesteps=self.timesteps)
+            # self.high_level_agent.pre_interaction(timestep=timestep, timesteps=self.timesteps)
+            # self.low_level_agent.pre_interaction(timestep=timestep, timesteps=self.timesteps)
 
             # ====== Hierarchical Control Logic =======
             if self.needs_new_high_level_action:
@@ -146,7 +146,7 @@ class HRLTrainer(Trainer):
                 self.env._unwrapped._apply_high_action(high_level_action)
                 self.needs_new_high_level_action = False
                 # Recording High-Level Action at Start Point
-                self._start_high_level_transition(obs, high_level_action)
+                self._start_high_level_transition(high_level_obs, high_level_action)
 
 
             # ====== Low-Level action with AAES Logic ======
@@ -157,7 +157,9 @@ class HRLTrainer(Trainer):
 
             # Environment step
             next_obs, reward, terminated, truncated, info = self.env.step(low_level_action)
-
+            high_level_obs = info["high_level_obs"]
+            high_level_reward = info["high_level_reward"]
+            high_level_goal = info["high_level_goal"]
 
             # =========================================================================== #
 
@@ -169,24 +171,11 @@ class HRLTrainer(Trainer):
                                           terminated, 
                                           truncated,
                                           info)
-            
-            self._record_high_level_transition(obs, 
-                                               high_level_action, 
-                                               info.get("high_level_reward"), 
-                                               next_obs,
-                                               terminated,
-                                               truncated,
-                                               info,
-                                               timestep,
-                                               self.timesteps)
 
-            is_option_done = info.get("option_terminated", torch.zeros_like(terminated)).any()
             is_episode_done = terminated.any() or truncated.any()
-            if is_option_done or is_episode_done:               
-                self.needs_new_high_level_action = True
-            
             if is_episode_done:
                 # HER apply for Low-Level Agent : Recording in Low-Level Agent's Replay Buffer
+                self.needs_new_high_level_action = True
                 self._apply_her_and_record_transition()
                 self.episode_counter += 1
                 obs, info = self.env.reset()
@@ -215,7 +204,6 @@ class HRLTrainer(Trainer):
 
 
             # =========== Update Observation to Next =============
-            obs = next_obs_dict
 
     
     def eval(self, eval_episodes: int = 100):
@@ -296,47 +284,7 @@ class HRLTrainer(Trainer):
             High-Level Policy가 action을 추출한 시점을 기록
             추후, Replay Buffer 구성을 위함.
         """
-        self.h_start_states.copy_(obs["policy"]["observation"])
-        self.h_actions.copy_(high_level_action)
-
-
-    def _record_high_level_transition(self,
-                                      obs: Dict,
-                                      actions: torch.Tensor,
-                                      rewards: torch.Tensor,
-                                      next_obs: Dict,
-                                      terminated: torch.Tensor,
-                                      truncated: torch.Tensor,
-                                      infos: Any,
-                                      **kwargs) -> None:
-        """
-            DIOL 학습을 위해 매 타임스텝의 고수준 경험을 리플레이 버퍼에 기록
-        """
-        states_to_store = {
-            "observation": obs["policy"]["observation"],
-            "desired_goal": obs["policy"]["final_goal"]
-        }
-        next_states_to_store = {
-            "observation": next_obs["policy"]["observation"],
-            "desired_goal": obs["policy"]["final_goal"]
-        }
-
-        self.high_level_agent.record_transition(states=obs["policy"]["observation"],
-                                                actions=actions,
-                                                rewards=rewards,
-                                                next_states=next_obs["policy"]["observation"],
-                                                terminated=terminated,
-                                                truncated=truncated,
-                                                infos=infos,
-                                                **kwargs)
-
-        self.high_level_agent.memory.add_samples(states=states_to_store,
-                                                 actions=actions,
-                                                 rewards=rewards,
-                                                 next_states=next_states_to_store,
-                                                 terminated=infos.get("option_terminated"),
-                                                 truncated=torch.zeros_like(infos.get("option_terminated")))
-
+        pass
     
     def _store_to_episode_buffer(self, 
                                  obs: Dict,
@@ -391,71 +339,6 @@ class HRLTrainer(Trainer):
             batch_to_store["truncated"].append(trajectory["truncated"])
             
             # ====== Augmented Data 저장 by HER ======
-            for t in range(real_length):
-                # t 시점의 데이터 세팅
-                obs = trajectory["states"][t]
-                action = trajectory["actions"][t]
-                reward = trajectory["rewards"][t]
-                next_obs = trajectory["next_states"][t]
-                terminated = trajectory["terminated"][t]
-                truncated = trajectory["truncated"][t]
-
-                for _ in range(k_ratio):
-                    if strategy == "future":
-                        future_step_idx = torch.randint(t, real_length)
-                    elif strategy == "episode":
-                        future_step_idx = torch.randint(0, real_length)
-                    else:
-                        ValueError("Not Supported HER Strategy.")
-                    
-                    # Original achieved goal : t시점의 achieved goal
-                    original_achieved_goal = trajectory["next_states"]["policy"]["achieved_goal"][t]
-                    # New desired goal : future_index 시점의 achieved goal
-                    new_desired_goal = trajectory["next_states"]["policy"]["achieved_goal"][future_step_idx]
-                    # Data Augmentation
-                    new_reward = self._recompute_reward(original_achieved_goal, new_desired_goal)
-                    synthetic_obs = copy.deepcopy(obs)
-                    synthetic_next_obs = copy.deepcopy(next_obs)
-                    synthetic_obs["policy"]["desired_goal"] = new_desired_goal
-                    synthetic_next_obs["policy"]["desired_goal"] = new_desired_goal
-                    
-                    batch_to_store["states"].append(synthetic_obs.unsqueeze(0))
-                    batch_to_store["actions"].append(action.unsqueeze(0))
-                    batch_to_store["rewards"].append(new_reward.unsqueeze(0))
-                    batch_to_store["next_states"].append(synthetic_next_obs.unsqueeze(0))
-                    batch_to_store["terminated"].append(terminated.unsqueeze(0))
-                    batch_to_store["truncated"].append(truncated.unsqueeze(0))
-            
-            if not batch_to_store["states"]:
-                return
-            
-            batch = {
-                "states": {k: torch.cat([s[k] for s in batch_to_store["states"]], dim=0) for k in batch_to_store["states"][0].keys()},
-                "actions": torch.cat(batch_to_store["actions"], dim=0),
-                "rewards": torch.cat(batch_to_store["rewards"], dim=0),
-                "next_states": {k: torch.cat([s[k] for s in batch_to_store["next_states"]], dim=0) for k in batch_to_store["next_states"][0].keys()},
-                "terminated": torch.cat(batch_to_store["terminated"], dim=0),
-                "truncated": torch.cat(batch_to_store["truncated"], dim=0),
-            }
-
-            # ======= 데이터 증강으로 인해, num_envs보다 차원이 커지는 경우, 배치 슬라이스 =======
-            total_samples_to_add = batch["actions"].shape[0]
-            slice_size = self.env.num_envs
-            if total_samples_to_add > 0:
-                for i in range(0, total_samples_to_add, slice_size):
-                    end_index = min(i + slice_size, total_samples_to_add)
-
-                    slice_batch = {}
-                    for name, value in batch.items():
-                        if isinstance(value, dict):
-                            slice_batch[name] = {k: v[i:end_index] for k, v in value.items()}
-                        else:
-                            slice_batch[name] = value[i:end_index]
-
-                    self.low_level_agent.memory.add_samples(**slice_batch)
-            
-            # Episode Buffer Clear
-            self.episode_buffer.clear()
 
 
     

@@ -44,7 +44,10 @@ class AISLDIOLRunner(Runner):
             # Hydra를 사용하여 커스텀 모델 인스턴스화
             if "_target_" in model_config:
                 model_config["observation_space"] = env._unwrapped.single_observation_space_h["policy"]
-                model_config["action_space"] = env._unwrapped.single_action_space_h
+                if role == "policy" or role == "target_policy":
+                    model_config["action_space"] = env._unwrapped.single_action_space_h["how"]
+                else:
+                    model_config["action_space"] = env._unwrapped.single_action_space_h["where"]
                 model_config["device"] = device
                 models["high_level"][role] = hydra.utils.instantiate(model_config)
                 print(f"  - Instantiated high-level model for role: '{role}'")

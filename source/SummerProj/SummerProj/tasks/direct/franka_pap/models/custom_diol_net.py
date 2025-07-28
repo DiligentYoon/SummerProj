@@ -10,7 +10,7 @@ class FrankaDeterministicPolicy(DeterministicMixin, Model):
     def __init__(self, observation_space, action_space, device,
                  encoder_features: List[int] = [256, 128],
                  policy_features: List[int] = [64],
-                 clip_actions: bool = False):
+                 clip_actions: bool = True):
         
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions, device)

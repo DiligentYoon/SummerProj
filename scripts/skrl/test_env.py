@@ -169,16 +169,19 @@ def main(env_cfg: dict, agent_cfg: dict):
     low_action_net, _, _ = runner.low_level_agent.act(low_obs, timestep=0, timesteps=0)
 
     # High Level Replay Buffer 저장 Test
+    # [E, K] dimension
     num_envs = env.num_envs
-    dummy_obs_high = high_obs.squeeze(1)
-    dummy_action_high_how = high_action_net["how"].squeeze(1)
-    dummy_action_high_where = high_action_net["where"].squeeze(1)
-    dummy_next_obs_high = high_obs.squeeze(1)
-    dummy_reward_high = torch.ones((num_envs, 1), dtype=torch.float32).to(device=env.device)
-    dummy_truncated = torch.zeros((num_envs, 1), dtype=torch.bool).to(device=env.device)
-    dummy_terminated = torch.zeros((num_envs, 1), dtype=torch.bool).to(device=env.device)
-    dummy_desired_goal_obj = torch.from_numpy(env._unwrapped.goal_space["obj_state"].sample()).to(device=env.device)
-    dummy_desired_tcp_state = torch.from_numpy(env._unwrapped.goal_space["tcp_state"].sample()).to(device=env.device)
+    dummy_obs_high = high_obs.squeeze(1).repeat((32,1,1))
+    dummy_action_high_how = high_action_net["how"].repeat((32,1))
+    dummy_action_high_where = high_action_net["where"].repeat((32,1))
+    dummy_next_obs_high = high_obs.squeeze(1).repeat((32,1,1))
+    dummy_reward_high = torch.ones((64, 1), dtype=torch.float32).to(device=env.device)
+    dummy_truncated = torch.zeros((64, 1), dtype=torch.bool).to(device=env.device)
+    dummy_terminated = torch.zeros((64, 1), dtype=torch.bool).to(device=env.device)
+    dummy_desired_goal_obj = torch.from_numpy(env._unwrapped.goal_space["obj_state"].sample()).to(device=env.device).repeat((64,1,1))
+    dummy_desired_tcp_state = torch.from_numpy(env._unwrapped.goal_space["tcp_state"].sample()).to(device=env.device).repeat((64,1))
+
+
 
     runner.high_level_agent.memory.add_samples(states=dummy_obs_high,
                                                actions_how=dummy_action_high_how,
@@ -193,6 +196,9 @@ def main(env_cfg: dict, agent_cfg: dict):
 
     # 저 수준 행동을 바탕으로 에피소드 스텝
     next_obs, reward, terminated, truncated, extras = env.step(low_action_net)
+
+    # 고 수준 에이전트 파라미터 업데이트
+    runner.high_level_agent._update(timestep=0, timesteps=0)
     
     # assert "high_level_reward" in extras and "option_terminated" in extras, "HRL signals are missing!"
     print("✅ Single step successful. HRL signals are present in 'extras'.")

@@ -5,11 +5,14 @@ import os
 import copy
 import numpy as np
 import torch
+import itertools
 import torch.nn as nn
 import gymnasium as gym
+import torch.nn.functional as F
 from gymnasium import spaces
 from packaging import version
 
+from skrl import config
 from skrl.agents.torch import Agent
 from skrl.models.torch import Model
 
@@ -31,10 +34,12 @@ DIOL_DEFAULT_CONFIG = {
     "learning_starts": 0,           # 학습 시작 전 최소 경험 수
     "temperature": 1.0,
 
+    "grad_norm_clip": 0,
     "update_interval": 1,           # 네트워크 학습 주기
     "target_update_interval": 10,   # 타겟 네트워크 학습 주기
 
     "exploration": {
+        "policy_noise": 0.01,
         "initial_epsilon": 1.0,     # 초기 탐험율 (epsilon-greedy)
         "final_epsilon": 0.01,      # 최종 탐험율
         "timesteps": 100000,        # 엡실론이 최종값까지 감소하는 데 걸리는 스텝 수
@@ -46,6 +51,10 @@ DIOL_DEFAULT_CONFIG = {
     "rewards_shaper": None,         # rewards shaping function: Callable(reward, timestep, timesteps) -> reward
 
     "mixed_precision": False,       # enable automatic mixed precision for higher performance
+
+    "policy_delay": 2,                      # policy delay update with respect to critic update
+    "smooth_regularization_noise": None,    # smooth noise for regularization
+    "smooth_regularization_clip": 0.5,      # clip for smooth regularization
 
     "experiment": {
         "directory": "",            # experiment's parent directory
@@ -82,6 +91,7 @@ class HybridActorCriticAgent(Agent):
 
         # models
         self.policy = self.models.get("policy", None)
+        self.target_policy = self.models.get("target_policy", None)
         self.value = {
             "value_1": self.models.get("value_1"),
             "value_2": self.models.get("value_2")
@@ -97,6 +107,7 @@ class HybridActorCriticAgent(Agent):
 
         # checkpoint models
         self.checkpoint_modules["policy"] = self.policy
+        self.checkpoint_modules["target_policy"] = self.target_policy
         self.checkpoint_modules["value_1"] = self.value["value_1"]
         self.checkpoint_modules["value_2"] = self.value["value_2"]
         self.checkpoint_modules["target_value_1"] = self.target_value["target_value_1"]
@@ -106,13 +117,18 @@ class HybridActorCriticAgent(Agent):
         for value_model, target_value_model in zip(self.value.values(), self.target_value.values()):
             if target_value_model is not None:
                 target_value_model.freeze_parameters(True)
-                target_value_model.update_parameters(value_model)
+                target_value_model.update_parameters(value_model, polyak=1.0)
+        
+        if self.target_policy is not None:
+            self.target_policy.freeze_parameters(True)
+            self.target_policy.update_parameters(self.target_policy, polyak=1.0)
         
         # pre-trained
         self.use_pre_trained_model = self.cfg.get("use_pre_trained", False)
         self.checkpoint_path      = self.cfg.get("checkpoint_path", "")
 
         # configuration
+        self._grad_norm_clip = self.cfg["grad_norm_clip"]
         self._gradient_steps = self.cfg["gradient_steps"]
         self._batch_size = self.cfg["batch_size"]
 
@@ -128,9 +144,12 @@ class HybridActorCriticAgent(Agent):
         self._learning_starts = self.cfg["learning_starts"]
         self._temperature = self.cfg["temperature"]
 
+        self._policy_delay = self.cfg["policy_delay"]
         self._update_interval = self.cfg["update_interval"]
         self._target_update_interval = self.cfg["target_update_interval"]
+        self._critic_update_counter = 0
 
+        self._policy_noise = self.cfg["exploration"]["policy_noise"]
         self._exploration_initial_epsilon = self.cfg["exploration"]["initial_epsilon"]
         self._exploration_final_epsilon = self.cfg["exploration"]["final_epsilon"]
         self._exploration_timesteps = self.cfg["exploration"]["timesteps"]
@@ -149,21 +168,16 @@ class HybridActorCriticAgent(Agent):
         # set up optimizers and learning rate schedulers
         if self.policy is not None and self.value is not None:
             self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=self._learning_rate)
+            self.value_optimizer = torch.optim.Adam(
+                itertools.chain(self.value["value_1"].parameters(), self.value["value_2"].parameters()), lr=self._learning_rate
+            )
             if self._learning_rate_scheduler is not None:
                 self.policy_scheduler = self._learning_rate_scheduler(
                     self.policy_optimizer, **self.cfg["learning_rate_scheduler_kwargs"]
                 )
-        
-        self.value_optimizer = {}
-        self.value_scheduler = {}
-        if not self.use_pre_trained_model:
-            for k, v in self.value.items():
-                if v is not None:
-                    self.value_optimizer[k] = torch.optim.Adam(v.parameters(), lr=self._learning_rate)
-                    if self._learning_rate_scheduler is not None:
-                        self.value_scheduler[k] = self._learning_rate_scheduler(
-                            self.value_optimizer[k], **self.cfg["learning_rate_scheduler_kwargs"]
-                        )
+                self.value_scheduler = self._learning_rate_scheduler(
+                    self.value_optimizer, **self.cfg["learning_rate_scheduler_kwargs"]
+                )
 
             self.checkpoint_modules["policy_optimizer"] = self.policy_optimizer
             self.checkpoint_modules["value_optimizer"] = self.value_optimizer
@@ -192,7 +206,7 @@ class HybridActorCriticAgent(Agent):
                 self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32, keep_dimensions=False)
                 self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool, keep_dimensions=False)
                 self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool, keep_dimensions=False)
-                self.memory.create_tensor(name="desired_goal", size=self.goal_space, dtype=torch.bool, keep_dimensions=True)
+                self.memory.create_tensor(name="desired_goal", size=self.goal_space, dtype=torch.float32, keep_dimensions=True)
 
             # clip noise bounds
             self.clip_actions_min = {}
@@ -341,84 +355,90 @@ class HybridActorCriticAgent(Agent):
             # sample a batch from memory
             (
                 sampled_states,
-                sampled_actions,
-                sampled_rewards,
+                sampled_actions_how,
+                sampled_actions_where,
                 sampled_next_states,
+                sampled_rewards,
                 sampled_terminated,
                 sampled_truncated,
-            ) = self.memory.sample(names=self._tensors_names, batch_size=self._batch_size)[0]
+                sampled_desired_goal_obj,
+                sampled_desired_goal_tcp
+            ) = self.memory.sample(names=self._tensors_names, batch_size=self._batch_size)
 
-            with torch.autocast(device_type=self.device, enabled=self._mixed_precision):
-                sampled_states = self._state_preprocessor(sampled_states, train=True)
-                sampled_next_states = self._state_preprocessor(sampled_next_states, train=True)
 
-                with torch.no_grad():
-                    # target policy smoothing
-                    next_actions, _, _ = self.target_policy.act({"states": sampled_next_states}, role="target_policy")
-                    if self._smooth_regularization_noise is not None:
-                        noises = torch.clamp(
-                            self._smooth_regularization_noise.sample(next_actions.shape),
-                            min=-self._smooth_regularization_clip,
-                            max=self._smooth_regularization_clip,
-                        )
-                        next_actions.add_(noises)
-                        next_actions.clamp_(min=self.clip_actions_min, max=self.clip_actions_max)
+            with torch.no_grad():
+                # per-point actor features (B, N, motion_param)
+                next_actions, _ = self.target_policy.compute({"states": sampled_next_states}, role="policy")
+                noise = (torch.randn_like(next_actions) * self._policy_noise)
+                next_actions = (next_actions + noise).clamp(-1, 1)
 
-                    # compute target values
-                    target_q1_values, _, _ = self.target_critic_1.act(
-                        {"states": sampled_next_states, "taken_actions": next_actions}, role="target_critic_1"
-                    )
-                    target_q2_values, _, _ = self.target_critic_2.act(
-                        {"states": sampled_next_states, "taken_actions": next_actions}, role="target_critic_2"
-                    )
-                    target_q_values = torch.min(target_q1_values, target_q2_values)
-                    target_values = (
-                        sampled_rewards
-                        + self._discount_factor
-                        * (sampled_terminated | sampled_truncated).logical_not()
-                        * target_q_values
-                    )
-
-                # compute critic loss
-                critic_1_values, _, _ = self.critic_1.act(
-                    {"states": sampled_states, "taken_actions": sampled_actions}, role="critic_1"
+                # compute target values -> Q Map (B, N, 1)
+                target_q1_map, _ = self.target_value["target_value_1"].compute(
+                    {"states": sampled_next_states, "taken_actions": next_actions}, role="target_critic_1"
                 )
-                critic_2_values, _, _ = self.critic_2.act(
-                    {"states": sampled_states, "taken_actions": sampled_actions}, role="critic_2"
+                target_q2_map, _ = self.target_value["target_value_2"].compute(
+                    {"states": sampled_next_states, "taken_actions": next_actions}, role="target_critic_2"
                 )
 
-                critic_loss = F.mse_loss(critic_1_values, target_values) + F.mse_loss(critic_2_values, target_values)
+                # (B, N, 1)
+                target_q_values = torch.min(target_q1_map, target_q2_map)
+                action_scores = torch.nn.functional.softmax(target_q_values / self._temperature, dim=1)
+
+                # (B, 1)
+                next_q_values = torch.sum(target_q_values * action_scores, dim=1)
+
+                # (B, 1)
+                target_values = (
+                    sampled_rewards
+                    + self._discount_factor
+                    * (sampled_terminated | sampled_truncated).logical_not()
+                    * next_q_values
+                )
+
+            # compute critic loss
+            # (B, N, motion_param)
+            actions, _ = self.policy.compute({"states": sampled_states}, role="policy")
+            
+            # (B, N, 1)
+            critic_q1_map, _ = self.value["value_1"].compute(
+                {"states": sampled_states, "taken_actions": actions}, role="critic_1"
+            )
+            critic_q2_map, _ = self.value["value_2"].compute(
+                {"states": sampled_states, "taken_actions": actions}, role="critic_2"
+            )
+
+            # (B, 1)
+            critic_1_values = critic_q1_map.squeeze(-1).gather(1, sampled_actions_where.long())
+            critic_2_values = critic_q2_map.squeeze(-1).gather(1, sampled_actions_where.long())
+
+            critic_loss = F.mse_loss(critic_1_values, target_values) + F.mse_loss(critic_2_values, target_values)
 
             # optimization step (critic)
-            self.critic_optimizer.zero_grad()
+            self.value_optimizer.zero_grad()
             self.scaler.scale(critic_loss).backward()
 
             if config.torch.is_distributed:
-                self.critic_1.reduce_parameters()
-                self.critic_2.reduce_parameters()
+                self.value["value_1"].reduce_parameters()
+                self.value["value_2"].reduce_parameters()
 
             if self._grad_norm_clip > 0:
-                self.scaler.unscale_(self.critic_optimizer)
+                self.scaler.unscale_(self.value_optimizer)
                 nn.utils.clip_grad_norm_(
-                    itertools.chain(self.critic_1.parameters(), self.critic_2.parameters()), self._grad_norm_clip
+                    itertools.chain(self.value["value_1"].parameters(), self.value["value_2"].parameters()), self._grad_norm_clip
                 )
 
-            self.scaler.step(self.critic_optimizer)
+            self.scaler.step(self.value_optimizer)
 
-            # delayed update
             self._critic_update_counter += 1
-            if not self._critic_update_counter % self._policy_delay:
+            if self._critic_update_counter % self._policy_delay == 0:
+                actions, _ = self.policy.compute({"states": sampled_states}, role="policy")
+                critic_q1_map, _ = self.value["value_1"].compute(
+                    {"states": sampled_states, "taken_actions": actions}, role="critic_1"
+                )
+                action_scores = torch.nn.functional.softmax(critic_q1_map / self._temperature, dim=1)
+                expected_q_values = torch.sum(critic_q1_map * action_scores, dim=1)
+                policy_loss = -expected_q_values.mean()
 
-                with torch.autocast(device_type=self._device_type, enabled=self._mixed_precision):
-                    # compute policy (actor) loss
-                    actions, _, _ = self.policy.act({"states": sampled_states}, role="policy")
-                    critic_values, _, _ = self.critic_1.act(
-                        {"states": sampled_states, "taken_actions": actions}, role="critic_1"
-                    )
-
-                    policy_loss = -critic_values.mean()
-
-                # optimization step (policy)
                 self.policy_optimizer.zero_grad()
                 self.scaler.scale(policy_loss).backward()
 
@@ -431,17 +451,17 @@ class HybridActorCriticAgent(Agent):
 
                 self.scaler.step(self.policy_optimizer)
 
-                # update target networks
-                self.target_critic_1.update_parameters(self.critic_1, polyak=self._polyak)
-                self.target_critic_2.update_parameters(self.critic_2, polyak=self._polyak)
+                self.target_value["target_value_1"].update_parameters(self.value["value_1"], polyak=self._polyak)
+                self.target_value["target_value_2"].update_parameters(self.value["value_2"], polyak=self._polyak)
                 self.target_policy.update_parameters(self.policy, polyak=self._polyak)
+
 
             self.scaler.update()  # called once, after optimizers have been stepped
 
             # update learning rate
             if self._learning_rate_scheduler:
                 self.policy_scheduler.step()
-                self.critic_scheduler.step()
+                self.value_scheduler.step()
 
             # record data
             if not self._critic_update_counter % self._policy_delay:
@@ -462,7 +482,7 @@ class HybridActorCriticAgent(Agent):
 
             if self._learning_rate_scheduler:
                 self.track_data("Learning / Policy learning rate", self.policy_scheduler.get_last_lr()[0])
-                self.track_data("Learning / Critic learning rate", self.critic_scheduler.get_last_lr()[0])
+                self.track_data("Learning / Critic learning rate", self.value_scheduler.get_last_lr()[0])
 
 
     

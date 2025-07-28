@@ -49,7 +49,6 @@ class EpisodeWiseReplayBuffer(Memory):
         self.tensors["terminated"][current_indices, env_indices] = terminated
         self.tensors["truncated"][current_indices, env_indices] = truncated
         self.tensors["desired_goal"][current_indices, env_indices] = desired_goal
-        self.tensors["achieved_goal"][current_indices, env_indices] = achieved_goal
 
         # 다음 데이터를 저장하기 위해 메모리 인덱스를 1 증가시킵니다.
         self.memory_index += 1
@@ -155,8 +154,24 @@ class HighLevelHindSightReplayBuffer(Memory):
         return True
 
 
-    
     def add_samples(self, **tensors):
+        """
+            **tensors:
+                "states": high-level 관측 벡터
+                "actions_how" : high-level 액션 벡터 (motion parameters)
+                "actions_where": high-level 액션 벡터 (target position)
+                "next_states": high-level 관측 벡터
+                "rewards": high-level 원본 보상
+                "truncated": 에피소드 종료 여부 1
+                "terminated": 에피소드 종료 여부 2
+                "desired_goal_obj_state": 물체의 목표 위치
+                "desired_goal_tcp_state": 로봇 TCP의 목표 위치
+            
+            Procedure:
+                1. 원본 데이터 먼저 저장 (에피소드 버퍼로부터 넘겨받은 데이터)
+                2. HER 데이터 증강 후, 저장
+
+        """
         # (E, k) -> we need to know Env Dimension
         batch_size = next(iter(tensors.values())).shape[0]
         
@@ -184,6 +199,76 @@ class HighLevelHindSightReplayBuffer(Memory):
         self.memory_index = (self.memory_index + batch_size) % self.memory_size
         if not self.filled and (self.memory_index + batch_size >= self.memory_size):
             self.filled = True
+
+    
+    # def her_augment(self, **tensors):
+    #     """
+    #         HER(Hindsight Experience Replay) Augmentation
+
+    #         Procedure:
+    #             1. 입력받은 tensor의 인덱스에서 k개의 샘플을 랜덤하게 선택
+    #             2. 각 샘플에 대해 목표 상태를 변경
+    #             3. 변경된 목표 상태를 바탕으로 리워드 계산
+    #             4. 새로운 리워드, 새로운 목표 상태를 가진 증강 데이터 버퍼에 저장
+    #     """
+    #     # 에피소드 데이터에서 k개의 샘플을 랜덤하게 선택
+    #     batch_size = next(iter(tensors.values())).shape[0]
+    #     for t in batch_size:
+    #         if t > self.memory_index:
+    #             raise ValueError(f"Batch size {t} exceeds current memory index {self.memory_index}. Cannot sample k elements.")
+
+    #         future_indices = torch.randint(t, batch_size, (self.k,), device=self.device)
+    #         next_states = tensors["achieved_goal"][t]
+    #         fake_goal = tensors["achieved_goal"][future_indices]
+
+    #         if type(fake_goal) == dict and type(next_states) == dict:
+    #             fake_done = torch.logical_and(torch.equal(next_states["obj_state"],
+    #                                                       fake_goal["obj_state"]),
+    #                                           torch.equal(next_states["tcp_state"],
+    #                                                       ))
+                
+
+    #         fake_done = torch.equal(fake_goal, next_states)
+    #         fake_rewards = torch.int(fake_done) - 1
+
+    #         tensors["terminated"] = fake_done
+    #         tensors["truncated"] = fake_done
+    #         tensors["desired_goal"] = fake_goal
+    #         tensors["reward"] = fake_rewards
+
+    #         for name, tensor in tensors.items():
+    #             # 메모리에 저장
+    #             # {states, actions, next_states, fake_rewards, truncated, terminated, fake_goals}
+    #             if name in self.tensors:
+    #                 if len(tensor.shape) == 1:
+    #                     tensor = tensor.unsqueeze(-1)
+    #                 if name == "rewards":
+    #                      self.tensors[name]
+                        
+                # done -> fake_done
+                # goal -> fake_goal
+                # rewards -> fake_rewards
+
+            # {states, actions, next_states, fake_rewards, truncated, terminated, fake_goals}
+
+            
+
+
+        # indices = torch.randint(0, self.memory_index, (self.k,), device=self.device)
+        
+
+        # state = self.tensors["states"][indices]
+
+
+        # # 각 샘플에 대해 목표 상태를 변경
+        # for name in ["desired_goal_obj_state", "desired_goal_tcp_state"]:
+        #     if name in self.tensors:
+        #         # 선택된 인덱스의 목표 상태를 변경
+        #         state = self.tensors[name][indices]
+
+        #         self.tensors[name][indices] = self.tensors["achieved_goal"][indices]
+
+
     
     def sample(self, batch_size: int, names: list[str]) -> tuple[list[torch.Tensor], torch.Tensor]:
         """
