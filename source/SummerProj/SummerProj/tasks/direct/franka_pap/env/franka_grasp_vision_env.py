@@ -42,6 +42,12 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
         self.is_grasp = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
+        # High Level Info
+        self.extras["high_level_obs"] = torch.zeros((self.num_envs, 
+                                                     self.cfg.high_level_observation_space[0], 
+                                                     self.cfg.high_level_observation_space[1]), device=self.device)
+        self.extras["high_level_reward"] = torch.zeros((self.num_envs, 1), device=self.device)
+
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
 
@@ -182,6 +188,47 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         self.prev_rot_error[env_ids] = self.rot_error[env_ids]
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], self.goal_pos_b[env_ids, 3:7])
         
+        # ======== Vision Data 업데이트 =========
+        all_clouds = []
+        all_labels = []
+        all_normals = []
+        total_clouds = None
+        total_labels = None
+        total_normals = None
+        for i, cam in enumerate(self.cam_list):
+            #   1.RGBA -> Seg label로 변환 : (H, W, 4) -> (H * W, 1)
+            semantic_info = cam.data.info[0]["semantic_segmentation"]["idToLabels"]
+            semantic_labels = convert_to_torch(cam.data.output["semantic_segmentation"][0])
+            transposed_labels = semantic_labels.transpose(0, 1)
+            semantic_labels = transposed_labels.flatten()
+                                                                  
+            #   2. Normal Vector : (H * W, 3)
+            normal_directions = convert_to_torch(cam.data.output["normals"])[0].reshape(-1, 3)
+
+            #   3. Point Cloud : (H * W, 3)
+            pointcloud = create_pointcloud_from_depth(
+                intrinsic_matrix=cam.data.intrinsic_matrices[0],
+                depth=cam.data.output["distance_to_image_plane"][0],
+                position=cam.data.pos_w[0],
+                orientation=cam.data.quat_w_ros[0],
+                keep_invalid=True,
+                device=sim.device,
+            )
+
+            #  4. Validation Mask : (H * W, 1)
+            valid_mask, mapped_labels = extract_valid_mask(pointcloud, semantic_labels, object_id, table_id)
+            if valid_mask is not None:
+                valid_cloud = pointcloud[valid_mask, ...]
+                valid_label = mapped_labels[valid_mask, ...]
+                valid_normal = normal_directions[valid_mask, ...]
+                all_clouds.append(valid_cloud)
+                all_labels.append(valid_label)
+                all_normals.append(valid_normal)
+
+                if torch.sum(valid_label) != torch.sum(mapped_labels):
+                      print(f"분류 오류")
+        
+
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
         # self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
@@ -199,6 +246,14 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         idx = torch.randint(0, n_vals, size, device=self.device, dtype=torch.int64)
         return idx.to(torch.float32) * delta + low
         
+    
+    def _apply_high_action(self, actions: torch.Tensor):
+        action_how = actions["how"] # Motion Parameter (E, k) -> Rotation information
+        action_where = actions["where"] # index (E, 1)
+
+        pass
+
+
 
 @torch.jit.script
 def calculate_robot_tcp(hand_pos_w: torch.Tensor,

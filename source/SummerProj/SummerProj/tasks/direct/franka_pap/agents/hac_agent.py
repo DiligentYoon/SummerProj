@@ -206,7 +206,7 @@ class HybridActorCriticAgent(Agent):
                 self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32, keep_dimensions=False)
                 self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool, keep_dimensions=False)
                 self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool, keep_dimensions=False)
-                self.memory.create_tensor(name="desired_goal", size=self.goal_space, dtype=torch.float32, keep_dimensions=True)
+                # self.memory.create_tensor(name="desired_goal", size=self.goal_space, dtype=torch.float32, keep_dimensions=True)
 
             # clip noise bounds
             self.clip_actions_min = {}
@@ -306,7 +306,7 @@ class HybridActorCriticAgent(Agent):
 
     def record_transition(self,
                           states: torch.Tensor,
-                          actions: torch.Tensor,
+                          actions: torch.Tensor | Any,
                           rewards: torch.Tensor,
                           next_states: torch.Tensor,
                           terminated: torch.Tensor,
@@ -321,7 +321,7 @@ class HybridActorCriticAgent(Agent):
         """
         # Tensorboard 데이터 로깅을 위해 데이터 Tracking
         super().record_transition(
-            states, actions, rewards, next_states, terminated, truncated, infos, timestep, timesteps
+            states, actions["how"], rewards, next_states, terminated, truncated, infos, timestep, timesteps
         )
 
         if self.memory is not None:
@@ -332,13 +332,27 @@ class HybridActorCriticAgent(Agent):
             # strage trasition in memory
             self.memory.add_samples(
                     states=states,
-                    actions=actions,
-                    rewards=rewards,
+                    actions_how=actions["how"],
+                    actions_where=actions["where"],
                     next_states=next_states,
-                    terminated=terminated,
+                    rewards=rewards,
                     truncated=truncated,
-                    desired_goal=infos["desired_goal"]
+                    terminated=terminated,
                 )
+
+
+    def post_interaction(self, timestep: int, timesteps: int) -> None:
+        """Callback called after the interaction with the environment
+
+        :param timestep: Current timestep
+        :type timestep: int
+        :param timesteps: Number of timesteps
+        :type timesteps: int
+        """
+        if timestep >= self._learning_starts:
+            self.set_mode("train")
+            self._update(timestep, timesteps)
+            self.set_mode("eval")
 
 
     def _update(self, timestep: int, timesteps: int) -> None:

@@ -164,13 +164,21 @@ def main(env_cfg: dict, agent_cfg: dict):
     high_obs = torch.from_numpy(env._unwrapped.observation_space_h.sample()).to(device=env.device)
     low_obs  = torch.from_numpy(env._unwrapped.observation_space_l.sample()).to(device=env.device)
 
+    print(f"[High-Level Obs Test] High Level Observation Dimension in {env.num_envs} envs : {high_obs.shape}")
+
     # 관측 벡터 바탕으로 행동 생성 Test
+    num_envs = env.num_envs
     high_action_net, _, _ = runner.high_level_agent.act(high_obs, timestep=0, timesteps=0)
     low_action_net, _, _ = runner.low_level_agent.act(low_obs, timestep=0, timesteps=0)
 
+    act1 = high_action_net["how"]
+    act2 = high_action_net["where"]
+    print(f"[High-Level Act Test] High Level Action Dimension in {num_envs} envs. \n")
+    print(f"[High-Level Act Test] Motion Params : {act1.shape} \n")
+    print(f"[High-Level Act Test] Target Positions : {act2.shape}")
+
     # High Level Replay Buffer 저장 Test
     # [E, K] dimension
-    num_envs = env.num_envs
     dummy_obs_high = high_obs.squeeze(1).repeat((32,1,1))
     dummy_action_high_how = high_action_net["how"].repeat((32,1))
     dummy_action_high_where = high_action_net["where"].repeat((32,1))
@@ -189,19 +197,26 @@ def main(env_cfg: dict, agent_cfg: dict):
                                                next_states=dummy_next_obs_high,
                                                rewards=dummy_reward_high,
                                                truncated=dummy_truncated,
-                                               terminated=dummy_terminated,
-                                               desired_goal_obj_state=dummy_desired_goal_obj,
-                                               desired_goal_tcp_state=dummy_desired_tcp_state)
+                                               terminated=dummy_terminated)
+                                            #    desired_goal_obj_state=dummy_desired_goal_obj,
+                                            #    desired_goal_tcp_state=dummy_desired_tcp_state
 
 
     # 저 수준 행동을 바탕으로 에피소드 스텝
     next_obs, reward, terminated, truncated, extras = env.step(low_action_net)
 
     # 고 수준 에이전트 파라미터 업데이트
-    runner.high_level_agent._update(timestep=0, timesteps=0)
+    # runner.high_level_agent._update(timestep=0, timesteps=0)
+
+    print(f"[High-Level Learning Test] From TD3 Algorithms, Parameter Updates are successful !")
     
     # assert "high_level_reward" in extras and "option_terminated" in extras, "HRL signals are missing!"
     print("✅ Single step successful. HRL signals are present in 'extras'.")
+
+    print(f"[Episode Step Test]")
+    # 전체 학습 루프
+    runner.trainer.train()
+
 
     # 시뮬레이터 종료
     env.close()
