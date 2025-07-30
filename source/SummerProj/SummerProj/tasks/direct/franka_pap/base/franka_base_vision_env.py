@@ -31,10 +31,14 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
             if value.get('class') == 'table':
                 self.table_id = int(key)
             if value.get('class') == 'object':
-                self.table_id = int(key)
+                self.object_id = int(key)
             
             if (self.table_id is not None) and (self.object_id is not None):
                 break
+        
+        # Camera Information
+        self.cam_intrinsic_mat = self.cam_list[0].data.intrinsic_matrices[0]
+
         
 
     def _setup_scene(self):
@@ -48,7 +52,7 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         self.scene.sensors["left_cam"] = self.cam_list[1]
         self.scene.sensors["right_cam"] = self.cam_list[2]
 
-        self.scene.clone_environments(copy_from_source=False)
+        self.scene.clone_environments(copy_from_source=True)
 
         # Spawn Light
         light_cfg = self.cfg.dome_light.spawn
@@ -56,24 +60,22 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):
-        # Reset Robot 
-        super()._reset_idx(env_ids)
-        # Reset Camera 
-        for cam in self.cam_list:
-            cam.reset(env_ids)
         # Reset Object : MultipleAsset 영향으로, 물체의 종류도 바뀌는 것을 기대
-        loc_noise_x = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
-        loc_noise_y = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
+        loc_noise_x = sample_uniform(-0.1, 0.1, (len(env_ids), 1), device=self.device)
+        loc_noise_y = sample_uniform(-0.1, 0.1, (len(env_ids), 1), device=self.device)
         loc_noise_z = sample_uniform(0.0, 0.0, (len(env_ids), 1), device=self.device)
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         # 난이도 고려, 회전 정보는 일단 그대로
         default_obj_state = self._object.data.default_root_state[env_ids, :]
         default_obj_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
         # object 상태 업데이트
+        self._object.reset(env_ids)
         self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
         self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)
-        
+        # Reset Robot 
+        super()._reset_idx(env_ids)
 
+        
 
     # ====================== Abstract Functions ================================
     @abstractmethod

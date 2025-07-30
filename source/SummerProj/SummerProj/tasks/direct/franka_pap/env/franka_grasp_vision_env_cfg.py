@@ -18,7 +18,8 @@ from ..base.franka_base_vision_cfg import FrankaVisionBaseCfg
 @configclass
 class FrankaGraspVisionEnvCfg(FrankaVisionBaseCfg):
     # camera
-    num_feature = 7
+    # num_feature = 7 # (x,y,z, gx, gy, gz, label) -> object and background
+    num_feature = 6 # (x,y,z, gx, gy, gz) -> only object
     num_obj_points = 200
     num_bg_points = 1000
 

@@ -21,8 +21,11 @@ class HybridActorNet(DeterministicMixin, Model):
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions=True) # 행동 값을 -1~1로 클리핑
 
+        in_channel_dim = self.observation_space.shape[-1] - 3 # pos dimension
+        action_dim = self.action_space.shape[-1]
+
         # Feature Extractor
-        self.feature_extractor = PointNet2Segmentation(in_channels=4, 
+        self.feature_extractor = PointNet2Segmentation(in_channels=in_channel_dim, 
                                                        out_channels=[],
                                                        normalize_pos=True,
                                                        pos_in_feature=False).to(device)
@@ -95,8 +98,10 @@ class HybridCriticNet(Model):
         """
         Model.__init__(self, observation_space, action_space, device)
 
+        in_channel_dim = self.observation_space.shape[-1] - 3 # pos dimension
+
         # Feature Extractor
-        self.feature_extractor = PointNet2Segmentation(in_channels=4, 
+        self.feature_extractor = PointNet2Segmentation(in_channels=in_channel_dim, 
                                                        out_channels=[],
                                                        normalize_pos=True,
                                                        pos_in_feature=False).to(device)

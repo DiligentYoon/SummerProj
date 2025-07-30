@@ -196,33 +196,32 @@ class HybridActorCriticAgent(Agent):
         super().init(trainer_cfg=trainer_cfg)
         self.set_mode("eval")
 
-        if not self.use_pre_trained_model:
-            # create tensors in memory
-            if self.memory is not None:
-                # desired goal : object goal flow + TCP state
-                self.memory.create_tensor(name="states", size=self.observation_space, dtype=torch.float32, keep_dimensions=True)
-                self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.float32, keep_dimensions=True)
-                self.memory.create_tensor(name="next_states", size=self.observation_space, dtype=torch.float32, keep_dimensions=True)
-                self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32, keep_dimensions=False)
-                self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool, keep_dimensions=False)
-                self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool, keep_dimensions=False)
-                # self.memory.create_tensor(name="desired_goal", size=self.goal_space, dtype=torch.float32, keep_dimensions=True)
+        # create tensors in memory
+        if self.memory is not None:
+            # desired goal : object goal flow + TCP state
+            self.memory.create_tensor(name="states", size=self.observation_space, dtype=torch.float32, keep_dimensions=True)
+            self.memory.create_tensor(name="actions", size=self.action_space, dtype=torch.float32, keep_dimensions=True)
+            self.memory.create_tensor(name="next_states", size=self.observation_space, dtype=torch.float32, keep_dimensions=True)
+            self.memory.create_tensor(name="rewards", size=1, dtype=torch.float32, keep_dimensions=False)
+            self.memory.create_tensor(name="terminated", size=1, dtype=torch.bool, keep_dimensions=False)
+            self.memory.create_tensor(name="truncated", size=1, dtype=torch.bool, keep_dimensions=False)
+            # self.memory.create_tensor(name="desired_goal", size=self.goal_space, dtype=torch.float32, keep_dimensions=True)
 
-            # clip noise bounds
-            self.clip_actions_min = {}
-            self.clip_actions_max = {}
-            if self.action_space is not None:
-                if isinstance(self.action_space, spaces.Dict):
-                    for key, value in self.action_space.items():
-                        if isinstance(value, spaces.Box):
-                            self.clip_actions_min[key] = torch.tensor(value.low, device=self.device)
-                            self.clip_actions_max[key] = torch.tensor(value.high, device=self.device)
-                        else:
-                            self.clip_actions_min[key] = None
-                            self.clip_actions_max[key] = None
-        else:
-            self.memory = None
-            self.set_running_mode("eval")
+            for k_high in self.memory.tensors.keys():
+                self._tensors_names.append(k_high)
+
+        # clip noise bounds
+        self.clip_actions_min = {}
+        self.clip_actions_max = {}
+        if self.action_space is not None:
+            if isinstance(self.action_space, spaces.Dict):
+                for key, value in self.action_space.items():
+                    if isinstance(value, spaces.Box):
+                        self.clip_actions_min[key] = torch.tensor(value.low, device=self.device)
+                        self.clip_actions_max[key] = torch.tensor(value.high, device=self.device)
+                    else:
+                        self.clip_actions_min[key] = None
+                        self.clip_actions_max[key] = None
 
 
     def act(self, states: torch.Tensor, timestep: int, timesteps: int, deterministic=False) -> tuple[torch.Tensor, None, dict]:
@@ -375,8 +374,6 @@ class HybridActorCriticAgent(Agent):
                 sampled_rewards,
                 sampled_terminated,
                 sampled_truncated,
-                sampled_desired_goal_obj,
-                sampled_desired_goal_tcp
             ) = self.memory.sample(names=self._tensors_names, batch_size=self._batch_size)
 
 

@@ -154,11 +154,7 @@ def main(env_cfg: dict, agent_cfg: dict):
         runner.agent.load(resume_path_low)
 
 
-    # --- [Agent Test] 단일 스텝 연동 테스트 ---
-    print("\n--- [Agent Test] Performing a single-step test ---")
-    # runner.high_level_agent.init()
-    # runner.low_level_agent.init()
-    obs, info = env.reset()
+    # # --- [Agent Test] 단일 스텝 연동 테스트 ---
     
     # 임의의 고, 저 수준 관측 생성 Test
     high_obs = torch.from_numpy(env._unwrapped.observation_space_h.sample()).to(device=env.device)
@@ -171,39 +167,39 @@ def main(env_cfg: dict, agent_cfg: dict):
     high_action_net, _, _ = runner.high_level_agent.act(high_obs, timestep=0, timesteps=0)
     low_action_net, _, _ = runner.low_level_agent.act(low_obs, timestep=0, timesteps=0)
 
-    act1 = high_action_net["how"]
-    act2 = high_action_net["where"]
-    print(f"[High-Level Act Test] High Level Action Dimension in {num_envs} envs. \n")
-    print(f"[High-Level Act Test] Motion Params : {act1.shape} \n")
-    print(f"[High-Level Act Test] Target Positions : {act2.shape}")
+    # act1 = high_action_net["how"]
+    # act2 = high_action_net["where"]
+    # print(f"[High-Level Act Test] High Level Action Dimension in {num_envs} envs. \n")
+    # print(f"[High-Level Act Test] Motion Params : {act1.shape} \n")
+    # print(f"[High-Level Act Test] Target Positions : {act2.shape}")
 
-    # High Level Replay Buffer 저장 Test
-    # [E, K] dimension
-    dummy_obs_high = high_obs.squeeze(1).repeat((32,1,1))
-    dummy_action_high_how = high_action_net["how"].repeat((32,1))
-    dummy_action_high_where = high_action_net["where"].repeat((32,1))
-    dummy_next_obs_high = high_obs.squeeze(1).repeat((32,1,1))
-    dummy_reward_high = torch.ones((64, 1), dtype=torch.float32).to(device=env.device)
-    dummy_truncated = torch.zeros((64, 1), dtype=torch.bool).to(device=env.device)
-    dummy_terminated = torch.zeros((64, 1), dtype=torch.bool).to(device=env.device)
-    dummy_desired_goal_obj = torch.from_numpy(env._unwrapped.goal_space["obj_state"].sample()).to(device=env.device).repeat((64,1,1))
-    dummy_desired_tcp_state = torch.from_numpy(env._unwrapped.goal_space["tcp_state"].sample()).to(device=env.device).repeat((64,1))
-
-
-
-    runner.high_level_agent.memory.add_samples(states=dummy_obs_high,
-                                               actions_how=dummy_action_high_how,
-                                               actions_where=dummy_action_high_where,
-                                               next_states=dummy_next_obs_high,
-                                               rewards=dummy_reward_high,
-                                               truncated=dummy_truncated,
-                                               terminated=dummy_terminated)
-                                            #    desired_goal_obj_state=dummy_desired_goal_obj,
-                                            #    desired_goal_tcp_state=dummy_desired_tcp_state
+    # # High Level Replay Buffer 저장 Test
+    # # [E, K] dimension
+    # dummy_obs_high = high_obs.squeeze(1).repeat((32,1,1))
+    # dummy_action_high_how = high_action_net["how"].repeat((32,1))
+    # dummy_action_high_where = high_action_net["where"].repeat((32,1))
+    # dummy_next_obs_high = high_obs.squeeze(1).repeat((32,1,1))
+    # dummy_reward_high = torch.ones((64, 1), dtype=torch.float32).to(device=env.device)
+    # dummy_truncated = torch.zeros((64, 1), dtype=torch.bool).to(device=env.device)
+    # dummy_terminated = torch.zeros((64, 1), dtype=torch.bool).to(device=env.device)
+    # dummy_desired_goal_obj = torch.from_numpy(env._unwrapped.goal_space["obj_state"].sample()).to(device=env.device).repeat((64,1,1))
+    # dummy_desired_tcp_state = torch.from_numpy(env._unwrapped.goal_space["tcp_state"].sample()).to(device=env.device).repeat((64,1))
 
 
-    # 저 수준 행동을 바탕으로 에피소드 스텝
-    next_obs, reward, terminated, truncated, extras = env.step(low_action_net)
+
+    # runner.high_level_agent.memory.add_samples(states=dummy_obs_high,
+    #                                            actions_how=dummy_action_high_how,
+    #                                            actions_where=dummy_action_high_where,
+    #                                            next_states=dummy_next_obs_high,
+    #                                            rewards=dummy_reward_high,
+    #                                            truncated=dummy_truncated,
+    #                                            terminated=dummy_terminated)
+    #                                         #    desired_goal_obj_state=dummy_desired_goal_obj,
+    #                                         #    desired_goal_tcp_state=dummy_desired_tcp_state
+
+
+    # # 저 수준 행동을 바탕으로 에피소드 스텝
+    # next_obs, reward, terminated, truncated, extras = env.step(low_action_net)
 
     # 고 수준 에이전트 파라미터 업데이트
     # runner.high_level_agent._update(timestep=0, timesteps=0)

@@ -6,6 +6,7 @@ import tqdm
 import torch
 import sys
 
+from gymnasium import spaces
 from skrl.agents.torch import Agent
 from skrl.envs.wrappers.torch import Wrapper
 from skrl.trainers.torch import Trainer
@@ -79,10 +80,11 @@ class HRLTrainer(Trainer):
 
         # 학습 로직 관련 변수
         self.current_high_level_action = {}
-        for name, val in self.env.cfg.high_level_action_space.items():
-            if type(val) == set:
-                val = list(val)[0]
-            self.current_high_level_action[name] = torch.zeros((self.env.num_envs, val), device=self.env.device)
+        for name, val in self.high_level_agent.action_space.items():
+            if isinstance(val, spaces.Box):
+                self.current_high_level_action[name] = torch.zeros((self.env.num_envs, val.shape[-1]), dtype=torch.float32, device=self.env.device)
+            if isinstance(val, spaces.Discrete):
+                self.current_high_level_action[name] = torch.zeros((self.env.num_envs, 1), dtype=torch.long, device=self.env.device)
 
         self.h_start_states = {
             "observation": torch.zeros((self.env.num_envs, self.high_level_agent.observation_space.shape[-1]), 
@@ -108,10 +110,6 @@ class HRLTrainer(Trainer):
         # 에이전트 초기화 & 리플레이 버퍼에 HRL 전용 Term 추가
         self.high_level_agent.init(trainer_cfg = self.cfg)
         self.low_level_agent.init(trainer_cfg = self.cfg)
-        
-        for k_high, k_low in zip(self.high_level_agent.memory.tensors.keys(), self.low_level_agent.memory.tensors.keys()):
-            self.high_level_agent._tensors_names.append(k_high)
-            self.low_level_agent._tensors_names.append(k_low)
         print("[HRLTrainer] Initialize agents...")
     
 
@@ -152,7 +150,7 @@ class HRLTrainer(Trainer):
             with torch.no_grad():
                 low_level_obs = obs
                 low_level_action = self.low_level_agent.act(low_level_obs, timestep=timestep, timesteps=self.timesteps)[0]
-                # AAES 우선 보류
+                # AAES 보류
                 # action_to_env = self._apply_aaes(low_level_action)
                 # Environment step (E, k)차원의 데이터
                 next_obs, reward, terminated, truncated, info = self.env.step(low_level_action)
@@ -181,7 +179,6 @@ class HRLTrainer(Trainer):
                 )
 
             # ===== Parameter Update & Data Logging =====
-            self.high_level_agent.post_interaction(timestep, self.timesteps)
             if not self.use_pre_trained_low:
                 self.low_level_agent.post_interaction(timestep, self.timesteps)
 
@@ -194,7 +191,7 @@ class HRLTrainer(Trainer):
                 # (E, k) Dimension
                 # self._apply_her_and_record_transition()
                 actions = {}
-                for name, tensor in self.current_high_level_action:
+                for name, tensor in self.current_high_level_action.items():
                     actions[name] = tensor[done_indices]
                 self.high_level_agent.record_transition(
                     states=self.high_level_obs_start[done_indices],
@@ -207,9 +204,11 @@ class HRLTrainer(Trainer):
                     timestep=timestep,
                     timesteps=self.timesteps
                 )
+                self.high_level_agent.post_interaction(timestep, self.timesteps)
                 self.needs_new_high_level_action[done_indices] = True
-                self.episode_counter += 1
-                obs, info = self.env.reset()
+                
+                with torch.no_grad():
+                    obs, info = self.env.reset()
             else:
                 obs = next_obs
 
@@ -270,7 +269,7 @@ class HRLTrainer(Trainer):
     # ======================= Auxillary Function =========================== #
     # ====================================================================== #
     def _sample_new_high_level_goal(self, obs: torch.Tensor, timestep: int) -> torch.Tensor:
-        action, _ = self.high_level_agent.act(obs, timestep=timestep, timesteps=self.timesteps)
+        action, _, _ = self.high_level_agent.act(obs, timestep=timestep, timesteps=self.timesteps)
         return action
     
     def _store_to_episode_buffer(self, 

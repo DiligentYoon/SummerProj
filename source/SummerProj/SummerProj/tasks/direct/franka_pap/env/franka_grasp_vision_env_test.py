@@ -16,7 +16,7 @@ from isaaclab.markers import VisualizationMarkers
 from ..base.franka_base_vision_env import FrankaVisionBaseEnv
 from .franka_grasp_vision_env_cfg import FrankaGraspVisionEnvCfg
 
-class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
+class FrankaGraspVisionTestEnv(FrankaVisionBaseEnv):
     """Franka Pap Approach Environment for the Franka Emika Panda robot."""
     cfg: FrankaGraspVisionEnvCfg
     def __init__(self, cfg: FrankaGraspVisionEnvCfg, render_mode: str | None = None, **kwargs):
@@ -244,19 +244,10 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         
     
     def _apply_high_action(self, actions: torch.Tensor):
-        # 액션 받아오기
-        # target point -> 샘플링된 object 포인트 클라우드에 액션 인덱스 매핑
-        # motion param -> 회전 정보 매핑
-        action_how = torch.rad2deg(torch.pi * actions["how"]) # Motion Parameter (E, k) -> Rotation information
+        action_how = actions["how"] # Motion Parameter (E, k) -> Rotation information
         action_where = actions["where"] # index (E, 1)
 
-        # Root Pose
-        root_pos_w = self._robot.data.root_state_w[:, :7]
-
-        # goal_pos_w -> 7차원
-        target_point_ids = action_where.unsqueeze(-1).expand(-1, -1, 3)
-        self.goal_pos_w[:, :3] = torch.gather(self.sampled_points, 1, target_point_ids).squeeze(1)
-        self.goal_pos_w[:, 3:7] = compute_target_rot(root_pos_w[:, 3:7], action_how, is_world_frame=True)
+        pass
 
 
 @torch.jit.script
@@ -302,9 +293,9 @@ def calculate_robot_tcp(hand_pos_w: torch.Tensor,
 
 def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
                                   label: torch.Tensor,
-                                  num_obj: int = 200, 
-                                  num_bg: int = 1000, 
-                                  only_obj = False) -> tuple[torch.Tensor, torch.Tensor]:
+                                  num_obj=200, 
+                                  num_bg=1000, 
+                                  only_obj=False) -> tuple[torch.Tensor, torch.Tensor]:
     """
         Inputs:
             pointcloud : [E, W * H * N_cam, 3]
@@ -315,7 +306,13 @@ def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
             label : [E, N_k, 1]
 
     """
-    # TODO : Point Cloud 개수가 아예 0인 경우 예외처리 해야 함
+
+    # 순서
+    # 1. 환경 수 체크
+    # 2. 환경 수 만큼 for loop
+    # 3. uniform sampling logic 적용
+    # 4. 적용해서 얻은 point cloud 환경 축으로 쌓기
+    # 5. 리턴
     num_envs = int(pointcloud.shape[0])
     if only_obj:
         final_pcd = torch.zeros((num_envs, num_obj, 3), dtype=torch.float32, device=pointcloud.device)
@@ -375,6 +372,51 @@ def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
     return final_pcd, final_lb
 
 
+    # # 포인트가 전혀 없는 경우, 빈 텐서를 즉시 반환
+    # if pointcloud.shape[0] == 0:
+    #     return (torch.empty((0, 0, 3), device=pointcloud.device),
+    #             torch.empty((0, 0, 1), dtype=label.dtype, device=label.device))
+
+    # obj_ids = torch.where(label == 1)[0]
+    # bg_ids = torch.where(label != 1)[0]
+
+    # sampled_obj_ids = torch.empty((0,), dtype=torch.long, device=pointcloud.device)
+    # sampled_bg_ids = torch.empty((0,), dtype=torch.long, device=pointcloud.device)
+
+    # # --- Object 샘플링 (안정성 강화) ---
+    # if len(obj_ids) > 0:
+    #     if len(obj_ids) >= num_obj: # 포인트가 충분하면 비복원 추출
+    #         sampled_obj_ids = obj_ids[torch.randperm(len(obj_ids))[:num_obj]]
+    #     else: # 포인트가 부족하면 복원 추출로 개수를 맞춤
+    #         print(f"Upsampling !")
+    #         indices_to_sample = torch.randint(0, len(obj_ids), (num_obj,), device=pointcloud.device)
+    #         sampled_obj_ids = obj_ids[indices_to_sample]
+
+    # if only_obj:
+    #         return pointcloud[sampled_obj_ids, ...], label[sampled_obj_ids, ...]
+    # else:
+    #     # --- Background 샘플링 (안정성 강화) ---
+    #     if len(bg_ids) > 0:
+    #         if len(bg_ids) >= num_bg: # 포인트가 충분하면 비복원 추출
+    #             sampled_bg_ids = bg_ids[torch.randperm(len(bg_ids))[:num_bg]]
+    #         else: # 포인트가 부족하면 복원 추출
+    #             print(f"Upsampling !")
+    #             indices_to_sample = torch.randint(0, len(bg_ids), (num_bg,), device=pointcloud.device)
+    #             sampled_bg_ids = bg_ids[indices_to_sample]
+
+    #     # 최종 셔플링 로직은 동일
+    #     cat_sampled_ids = torch.cat((sampled_obj_ids, sampled_bg_ids))
+    
+    #     # 합쳐진 인덱스가 없는 경우 처리
+    #     if len(cat_sampled_ids) == 0:
+    #         return (torch.empty((0, 3), device=pointcloud.device),
+    #                 torch.empty((0,), dtype=label.dtype, device=label.device))
+
+    #     sampled_ids = cat_sampled_ids[torch.randperm(len(cat_sampled_ids))]
+
+    #     return pointcloud[sampled_ids, ...], label[sampled_ids, ...]
+
+
 
 # @torch.jit.script
 # def randomize_rotation(rand0, rand1, x_unit_tensor, y_unit_tensor):
@@ -382,25 +424,18 @@ def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
 #         quat_from_angle_axis(rand0 * np.pi, x_unit_tensor), quat_from_angle_axis(rand1 * np.pi, y_unit_tensor)
 #     )
 
-@torch.jit.script
-def compute_target_rot(base_angle: torch.Tensor, delta_angle: torch.Tensor, is_world_frame: bool = False) -> torch.Tensor:
-    """
-        Compute Delta Rotation :
-            base_angle: (N, 4) quaternion form
-            delta_angle : (N, 3) axis-angle form (axis * angle)
-    """
-    # delta_angle(axis-angle)을 delta_rot(quaternion)으로 변환하는 공통 로직
-    delta_rot_axis = delta_angle
-    delta_rot_angle = torch.norm(delta_rot_axis, dim=-1)
-    # 0으로 나누는 것을 방지하기 위한 epsilon 추가
-    delta_rot_axis_normalized = delta_rot_axis / (delta_rot_angle.unsqueeze(-1) + 1e-6)
-    delta_rot = quat_from_angle_axis(delta_rot_angle, delta_rot_axis_normalized)
-
-    if is_world_frame:
-        # World Frame 기준이므로, 변환된 delta_rot 자체가 목표 회전값
-        target_rot_b = delta_rot
-    else:
-        # Base Frame 기준이므로, base_angle에 변환된 delta_rot 곱셈
-        target_rot_b = quat_mul(delta_rot, base_angle)
+# @torch.jit.script
+# def compute_target_rot(base_angle: torch.Tensor, delta_angle: torch.Tensor) -> torch.Tensor:
+#         """
+#             Compute Delta Rotation :
+#                 base_angle: (N, 4) quaternion form
+#                 target_angle : (N, 3) euler angle form
             
-    return target_rot_b
+#                 -> we calculate target_rotation by quaternion form in root frame
+#         """
+#         delta_rot_axis = delta_angle
+#         delta_rot_angle = torch.norm(delta_rot_axis, dim=-1)
+#         delta_rot_axis_normalized = delta_rot_axis / (delta_rot_angle.unsqueeze(-1) + 1e-6)
+#         delta_rot = quat_from_angle_axis(delta_rot_angle, delta_rot_axis_normalized)
+#         target_rot_b = quat_mul(delta_rot, base_angle)
+#         return target_rot_b
