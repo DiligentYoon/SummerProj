@@ -5,7 +5,7 @@ import os
 import isaaclab.sim as sim_utils
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import TiledCameraCfg
-from isaaclab.assets import RigidObjectCfg
+from isaaclab.assets import RigidObjectCfg, AssetBaseCfg
 from isaaclab.utils import configclass
 
 from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
