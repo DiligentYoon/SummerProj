@@ -91,15 +91,13 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
             spawn_z_w.append((obj_aabb[5] - obj_aabb[2]) / 2.0 + self.table_aabb[5])
 
 
-        loc_noise_x = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
-        loc_noise_y = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
+        loc_noise_x = sample_uniform(-0.4, 0.4, (len(env_ids), 1), device=self.device)
+        loc_noise_y = sample_uniform(-0.4, 0.4, (len(env_ids), 1), device=self.device)
         loc_noise_z = torch.tensor(spawn_z_w, device=self.device).reshape(-1, 1)
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         # 난이도 고려, 회전 정보는 일단 그대로
         default_obj_state = self._object.data.default_root_state[env_ids, :]
-        # default_obj_state[:, :3] += loc_noise
-        default_obj_state[:, :2] += self.scene.env_origins[:, :2]
-        default_obj_state[:, 2] = -0.3
+        default_obj_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :]
         # object 상태 업데이트
         self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
         self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)

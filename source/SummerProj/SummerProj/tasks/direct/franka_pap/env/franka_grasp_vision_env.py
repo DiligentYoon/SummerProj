@@ -43,6 +43,10 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
         self.is_grasp = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+        # Vision Info
+        self.sampled_points = torch.zeros((self.num_envs, self.cfg.num_obj_points, 3), dtype=torch.float32, device=self.device)
+        self.sampled_labels = torch.zeros((self.num_envs, self.cfg.num_obj_points, 1), dtype=torch.long, device=self.device)
+
         # High Level Info
         self.extras["high_level_obs"] = torch.zeros((self.num_envs, 
                                                      self.cfg.high_level_observation_space[0], 
@@ -107,7 +111,7 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         
         
     def _get_dones(self):
-        self._compute_intermediate_values()
+        self._compute_intermediate_values(is_reset=False)
         # self.is_reach = torch.logical_and(self.loc_error < 1e-2, self.rot_error < 1e-1)
         truncated = self.episode_length_buf >= self.max_episode_length - 1
         terminated = truncated
@@ -121,32 +125,31 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
     
     def _get_observations(self):
         # Object 및 Robot의 상태를 포함한 Observation vector 생성
-        # joint_pos_scaled = (
-        #     2.0
-        #     * (self.robot_joint_pos - self.robot_dof_lower_limits)
-        #     / (self.robot_dof_upper_limits - self.robot_dof_lower_limits)
-        #     - 1.0
-        # )
+        joint_pos_scaled = (
+            2.0
+            * (self.robot_joint_pos - self.robot_dof_lower_limits)
+            / (self.robot_dof_upper_limits - self.robot_dof_lower_limits)
+            - 1.0
+        )
 
-        # object_loc_tcp, object_rot_tcp = subtract_frame_transforms(
-        # self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
-        # goal_pos_tcp = torch.cat([object_loc_tcp, object_rot_tcp], dim=1)
+        object_loc_tcp, object_rot_tcp = subtract_frame_transforms(
+        self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
+        goal_pos_tcp = torch.cat([object_loc_tcp, object_rot_tcp], dim=1)
 
-        # obs = torch.cat(
-        #     (   
-        #         # robot joint pose (7)
-        #         joint_pos_scaled[:, 0:self.num_active_joints],
-        #         # robot joint velocity (7)
-        #         self.robot_joint_vel[:, 0:self.num_active_joints],
-        #         # TCP 6D pose w.r.t Root frame (7)
-        #         self.robot_grasp_pos_b,
-        #         # object position w.r.t Root frame (7)
-        #         self.goal_pos_b,
-        #         # object position w.r.t TCP frame (7)
-        #         goal_pos_tcp
-        #     ), dim=1
-        # )
-        obs = torch.zeros((self.num_envs, self.cfg.observation_space), dtype=torch.float32, device=self.device)
+        obs = torch.cat(
+            (   
+                # robot joint pose (7)
+                joint_pos_scaled[:, 0:self.num_active_joints],
+                # robot joint velocity (7)
+                self.robot_joint_vel[:, 0:self.num_active_joints],
+                # TCP 6D pose w.r.t Root frame (7)
+                self.robot_grasp_pos_b,
+                # object position w.r.t Root frame (7)
+                self.goal_pos_b,
+                # object position w.r.t TCP frame (7)
+                goal_pos_tcp
+            ), dim=1
+        )
 
         self.extras["high_level_obs"] = torch.cat([self.sampled_points,
                                                    self.sampled_points], dim=-1)
@@ -160,10 +163,10 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
             env_ids = self._robot._ALL_INDICES
         # ============ Robot State & Scene 리셋 ===============
         super()._reset_idx(env_ids)
-        self._compute_intermediate_values(env_ids)
+        self._compute_intermediate_values(env_ids, is_reset=True)
 
     
-    def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None):
+    def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None, is_reset=False):
         if env_ids is None:
             env_ids = self._robot._ALL_INDICES
 
@@ -189,40 +192,44 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], self.goal_pos_b[env_ids, 3:7])
         
         # ======== Vision Data 업데이트 =========
-        all_clouds = []
-        all_labels = []
-        for i, cam in enumerate(self.cam_list):
-            # (E, H, W, 1) -> (E, W, H, 1)
-            semantic_labels = cam.data.output["semantic_segmentation"].transpose(1, 2)
-            # (E, W * H, 1)
-            semantic_labels = semantic_labels.reshape(self.num_envs, -1, 1)                                                 
-            # Point Cloud : (E, W * H, 3)
-            pointcloud = create_pointcloud_from_depth(
-                intrinsic_matrix=self.cam_intrinsic_mat,
-                depth=cam.data.output["distance_to_image_plane"],
-                position=cam.data.pos_w,
-                orientation=cam.data.quat_w_ros,
-                keep_invalid=True,
-                device=self.device,
-            )
-            all_clouds.append(pointcloud)
-            all_labels.append(semantic_labels)
-        # Valid Mask : (E, W * H * N_cam, 1)
-        all_clouds = torch.cat(all_clouds, dim=1)
-        all_labels = torch.cat(all_labels, dim=1)
-        _, mapped_labels = extract_valid_mask(all_labels, self.object_id, self.table_id)
-        # 각 환경에서 얻어지는 Valid Point Cloud Mask가 서로 다르기 때문에 곧바로 브로드캐스팅은 의미가 없음
-        # 따라서, 동일한 갯수로 각 환경 별로 uniform 샘플링을 먼저 한 뒤, 합쳐야 한다.
-        # (E, W * H * N_cam, 3) & (E, W * H * N_cam, 1) ---> (E, N_obj, 3) & (E, N_obj, 1)
-        self.sampled_points, self.sampled_labels = uniform_sampling_for_pointnet(all_clouds, 
-                                                                                 mapped_labels,
-                                                                                 num_obj=self.cfg.num_obj_points,
-                                                                                 num_bg=self.cfg.num_bg_points,
-                                                                                 only_obj=True)
+        if is_reset:
+            all_clouds = []
+            all_labels = []
+            for i, cam in enumerate(self.cam_list):
+                # (E, H, W, 1) -> (E, W, H, 1)
+                semantic_labels = cam.data.output["semantic_segmentation"][env_ids].transpose(1, 2)
+                # (E, W * H, 1)
+                semantic_labels = semantic_labels.reshape(self.num_envs, -1, 1)                                                 
+                # Point Cloud : (E, W * H, 3)
+                pointcloud = create_pointcloud_from_depth(
+                    intrinsic_matrix=self.cam_intrinsic_mat,
+                    depth=cam.data.output["distance_to_image_plane"][env_ids],
+                    position=cam.data.pos_w[env_ids],
+                    orientation=cam.data.quat_w_ros[env_ids],
+                    keep_invalid=True,
+                    device=self.device,
+                )
+                all_clouds.append(pointcloud)
+                all_labels.append(semantic_labels)
+            # Valid Mask : (E, W * H * N_cam, 1)
+            all_clouds = torch.cat(all_clouds, dim=1)
+            all_labels = torch.cat(all_labels, dim=1)
+            if self.object_id is not None:
+                _, mapped_labels = extract_valid_mask(all_labels, self.object_id, self.table_id)
+            else:
+                ValueError("There is no Object Ids. Please check the object spawner")
+            # 각 환경에서 얻어지는 Valid Point Cloud Mask가 서로 다르기 때문에 곧바로 브로드캐스팅은 의미가 없음
+            # 따라서, 동일한 갯수로 각 환경 별로 uniform 샘플링을 먼저 한 뒤, 합쳐야 한다.
+            # (E, W * H * N_cam, 3) & (E, W * H * N_cam, 1) ---> (E, N_obj, 3) & (E, N_obj, 1)
+            self.sampled_points[env_ids], self.sampled_labels[env_ids] = uniform_sampling_for_pointnet(all_clouds, 
+                                                                                                       mapped_labels,
+                                                                                                       num_obj=self.cfg.num_obj_points,
+                                                                                                       num_bg=self.cfg.num_bg_points,
+                                                                                                       only_obj=True)
         
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        # self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
+        self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
         self.pcd_marker.visualize(translations=self.sampled_points.reshape(-1, 3))
     
 

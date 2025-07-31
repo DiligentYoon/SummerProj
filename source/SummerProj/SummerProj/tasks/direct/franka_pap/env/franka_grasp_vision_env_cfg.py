@@ -28,7 +28,7 @@ class FrankaGraspVisionEnvCfg(FrankaVisionBaseCfg):
     episode_length_s = 10.0
     decimation = 10
     action_space = 21
-    observation_space = 39
+    observation_space = 35
     state_space = 0
 
 
@@ -43,9 +43,9 @@ class FrankaGraspVisionEnvCfg(FrankaVisionBaseCfg):
         "tcp_state" : 3 
     }
 
-    low_level_observation_space = 39
-    low_level_action_space = 21
-    low_level_state_space = 0
+    low_level_observation_space = observation_space
+    low_level_action_space = action_space
+    low_level_state_space = state_space
 
 
 
