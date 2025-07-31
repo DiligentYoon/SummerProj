@@ -10,6 +10,7 @@ from abc import abstractmethod
 
 import omni.usd
 from pxr import Sdf
+from isaacsim.core.utils import bounds
 
 from isaaclab.sensors import TiledCamera
 from isaaclab.assets import RigidObject
@@ -61,21 +62,47 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         light_cfg = self.cfg.dome_light.spawn
         light_cfg.func(self.cfg.dome_light.prim_path, light_cfg)
 
+        # Table Spec은 모든 환경에서 동일
+        table_bb_cache = bounds.create_bbox_cache()
+        self.table_prim = omni.usd.get_context().get_stage().GetPrimAtPath(
+            f"/World/envs/env_0/Table"
+        )
+        self.table_aabb = bounds.compute_aabb(bbox_cache=table_bb_cache, 
+                                              prim_path=self.table_prim.GetPrimPath().pathString)
+
+
     
     def _reset_idx(self, env_ids: torch.Tensor | None):
-        # Reset Object : MultipleAsset 영향으로, 물체의 종류도 바뀌는 것을 기대
-        loc_noise_x = sample_uniform(-0.1, 0.1, (len(env_ids), 1), device=self.device)
-        loc_noise_y = sample_uniform(-0.1, 0.1, (len(env_ids), 1), device=self.device)
-        loc_noise_z = sample_uniform(0.0, 0.0, (len(env_ids), 1), device=self.device)
+        super()._reset_idx(env_ids)
+
+        spawn_z_w = []
+        for env_id in env_ids.tolist():
+            prim_path = f"/World/envs/env_{env_id}/Object"
+
+            obj_bbox_cache = bounds.create_bbox_cache()
+            stage = omni.usd.get_context().get_stage()
+            prim = stage.GetPrimAtPath(prim_path)
+
+            if not prim.IsValid():
+                spawn_z_w.append(0)
+                continue
+                
+            obj_aabb = bounds.compute_aabb(obj_bbox_cache, prim_path)
+            spawn_z_w.append((obj_aabb[5] - obj_aabb[2]) / 2.0 + self.table_aabb[5])
+
+
+        loc_noise_x = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
+        loc_noise_y = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
+        loc_noise_z = torch.tensor(spawn_z_w, device=self.device).reshape(-1, 1)
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         # 난이도 고려, 회전 정보는 일단 그대로
         default_obj_state = self._object.data.default_root_state[env_ids, :]
-        default_obj_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
+        default_obj_state[:, :3] += loc_noise
+        default_obj_state[:, :2] += self.scene.env_origins[:, :2]
+        default_obj_state[:, 2] = -0.1
         # object 상태 업데이트
         self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
         self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)
-        # Reset Robot 
-        super()._reset_idx(env_ids)
 
         
 

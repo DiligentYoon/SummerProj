@@ -51,6 +51,7 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
 
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
+        self.pcd_marker = VisualizationMarkers(self.cfg.pcd_marker)
 
 
     # ================= Impedance Control Gain =================
@@ -177,12 +178,6 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         self.robot_grasp_pos_b[env_ids] = calculate_robot_tcp(hand_pos_w, root_pos_w, self.tcp_offset_hand[env_ids])
         self.robot_grasp_pos_w[env_ids, 3:7] = quat_mul(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, 3:7])
         self.robot_grasp_pos_w[env_ids, :3] = root_pos_w[:, :3] + quat_apply(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, :3])
-
-        # ========= Object 업데이트 ==========
-        self.goal_pos_w[env_ids] = self._object.data.root_state_w[env_ids, :7]
-        self.goal_pos_b[env_ids] = torch.cat(subtract_frame_transforms(
-            root_pos_w[:, :3], root_pos_w[:, 3:7], self.goal_pos_w[env_ids, :3], self.goal_pos_w[env_ids, 3:7]
-        ), dim=1)
         
         # ========= Position Error 업데이트 =========
         # Location
@@ -228,6 +223,7 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
         # self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
+        self.pcd_marker.visualize(translations=self.sampled_points.reshape(-1, 3))
     
 
     def sample_discrete_uniform(self,
@@ -243,20 +239,25 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         return idx.to(torch.float32) * delta + low
         
     
-    def _apply_high_action(self, actions: torch.Tensor):
+    def _apply_high_action(self, actions: torch.Tensor, env_ids: torch.Tensor):
         # 액션 받아오기
         # target point -> 샘플링된 object 포인트 클라우드에 액션 인덱스 매핑
         # motion param -> 회전 정보 매핑
-        action_how = torch.rad2deg(torch.pi * actions["how"]) # Motion Parameter (E, k) -> Rotation information
-        action_where = actions["where"] # index (E, 1)
+        action_how = torch.rad2deg(torch.pi * actions["how"][env_ids]) # Motion Parameter (E, k) -> Rotation information
+        action_where = actions["where"][env_ids] # index (E, 1)
 
         # Root Pose
-        root_pos_w = self._robot.data.root_state_w[:, :7]
+        root_pos_w = self._robot.data.root_state_w[env_ids, :7]
 
-        # goal_pos_w -> 7차원
+        # goal_pos_w : (n, 7)
         target_point_ids = action_where.unsqueeze(-1).expand(-1, -1, 3)
-        self.goal_pos_w[:, :3] = torch.gather(self.sampled_points, 1, target_point_ids).squeeze(1)
-        self.goal_pos_w[:, 3:7] = compute_target_rot(root_pos_w[:, 3:7], action_how, is_world_frame=True)
+        self.goal_pos_w[env_ids, :3] = torch.gather(self.sampled_points[env_ids], 1, target_point_ids).squeeze(1)
+        self.goal_pos_w[env_ids, 3:7] = compute_target_rot(root_pos_w[:, 3:7], action_how, is_world_frame=True)
+
+        # goal_pos_b : (n, 7)
+        self.goal_pos_b[env_ids, :3], self.goal_pos_b[env_ids, 3:7] = subtract_frame_transforms(
+            root_pos_w[:, :3], root_pos_w[:, 3:7], self.goal_pos_w[env_ids, :3], self.goal_pos_w[env_ids, 3:7]
+        )
 
 
 @torch.jit.script
@@ -315,7 +316,6 @@ def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
             label : [E, N_k, 1]
 
     """
-    # TODO : Point Cloud 개수가 아예 0인 경우 예외처리 해야 함
     num_envs = int(pointcloud.shape[0])
     if only_obj:
         final_pcd = torch.zeros((num_envs, num_obj, 3), dtype=torch.float32, device=pointcloud.device)
@@ -346,6 +346,8 @@ def uniform_sampling_for_pointnet(pointcloud: torch.Tensor,
                 print(f"Upsampling !")
                 indices_to_sample = torch.randint(0, len(obj_ids), (num_obj,), device=pcd.device)
                 sampled_obj_ids = obj_ids[indices_to_sample]
+        else:
+            continue
         
         if only_obj:
             final_pcd[i] = pcd[sampled_obj_ids, ...]

@@ -144,7 +144,7 @@ class HRLTrainer(Trainer):
                     self.needs_new_high_level_action[goal_request_indices] = False
                     for name, tensor in high_level_action.items():
                         self.current_high_level_action[name][goal_request_indices] = tensor
-                    self.env._unwrapped._apply_high_action(self.current_high_level_action)
+                    self.env._unwrapped._apply_high_action(self.current_high_level_action, goal_request_indices)
 
             # ====== Low-Level action with AAES Logic ======
             with torch.no_grad():

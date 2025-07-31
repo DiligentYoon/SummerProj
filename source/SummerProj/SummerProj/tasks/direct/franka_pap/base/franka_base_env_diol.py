@@ -96,6 +96,7 @@ class FrankaBaseDIOLEnv(DirectDIOL):
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):
+        super()._reset_idx(env_ids)
         # Initialize robot joint state with pose randomization
         pos_noise = sample_uniform(
             -0.125, 0.125,
@@ -109,7 +110,6 @@ class FrankaBaseDIOLEnv(DirectDIOL):
         # Publish to simulator
         self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
-        super()._reset_idx(env_ids)
 
 
     # ====================== Abstract Functions ================================

@@ -6,6 +6,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.assets import RigidObjectCfg, AssetBaseCfg
+from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
 from isaaclab.utils import configclass
 
 from .franka_base_env_diol_cfg import FrankaBaseDIOLEnvCfg
@@ -62,40 +63,59 @@ OBJECT_DIR = {
 @configclass
 class FrankaVisionBaseCfg(FrankaBaseDIOLEnvCfg):
     
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=16, env_spacing=3.0, replicate_physics=False)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=16, env_spacing=3.0, replicate_physics=True)
 
     # Multi object (Total 6 Objects)
+    # object: RigidObjectCfg = RigidObjectCfg(
+    #     prim_path="/World/envs/env_.*/Object",
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=[0.67, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
+    #     spawn=sim_utils.MultiAssetSpawnerCfg(
+    #         assets_cfg=[
+    #             # sim_utils.UsdFileCfg(
+    #             #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_1"]["url"],
+    #             #     scale=(0.01, 0.01, 0.01)
+    #             # ),
+    #             # sim_utils.UsdFileCfg(
+    #             #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_2"]["url"],
+    #             #     scale=(0.01, 0.01, 0.01)
+    #             # ),
+    #             # sim_utils.UsdFileCfg(
+    #             #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_1"]["url"],
+    #             #     scale=(0.01, 0.01, 0.01)
+    #             # ),
+    #             sim_utils.UsdFileCfg(
+    #                 usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_2"]["url"],
+    #                 scale=(0.01, 0.01, 0.01)
+    #             ),
+    #             # sim_utils.UsdFileCfg(
+    #             #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cylinder_1"]["url"],
+    #             #     scale=(0.01, 0.01, 0.01)
+    #             # ),
+    #             # sim_utils.UsdFileCfg(
+    #             #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cylinder_2"]["url"],
+    #             #     scale=(0.01, 0.01, 0.01)
+    #             # ),
+    #         ],
+    #         random_choice=True,
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(
+    #                 solver_position_iteration_count=16,
+    #                 solver_velocity_iteration_count=1,
+    #                 max_angular_velocity=1000.0,
+    #                 max_linear_velocity=1000.0,
+    #                 max_depenetration_velocity=5.0,
+    #                 disable_gravity=False,
+    #                 ),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+    #         semantic_tags=[("class", "object")]
+    #         ),
+    #     )
+    
     object: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Object",
         init_state=RigidObjectCfg.InitialStateCfg(pos=[0.67, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
-        spawn=sim_utils.MultiAssetSpawnerCfg(
-            assets_cfg=[
-                # sim_utils.UsdFileCfg(
-                #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_1"]["url"],
-                #     scale=(0.01, 0.01, 0.01)
-                # ),
-                # sim_utils.UsdFileCfg(
-                #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_2"]["url"],
-                #     scale=(0.01, 0.01, 0.01)
-                # ),
-                # sim_utils.UsdFileCfg(
-                #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_1"]["url"],
-                #     scale=(0.01, 0.01, 0.01)
-                # ),
-                sim_utils.UsdFileCfg(
-                    usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_2"]["url"],
-                    scale=(0.01, 0.01, 0.01)
-                ),
-                # sim_utils.UsdFileCfg(
-                #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cylinder_1"]["url"],
-                #     scale=(0.01, 0.01, 0.01)
-                # ),
-                # sim_utils.UsdFileCfg(
-                #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cylinder_2"]["url"],
-                #     scale=(0.01, 0.01, 0.01)
-                # ),
-            ],
-            random_choice=True,
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_2"]["url"],
+            scale=(0.01, 0.01, 0.01),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     solver_position_iteration_count=16,
                     solver_velocity_iteration_count=1,
@@ -106,8 +126,8 @@ class FrankaVisionBaseCfg(FrankaBaseDIOLEnvCfg):
                     ),
             collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
             semantic_tags=[("class", "object")]
-            ),
-        )
+        ),
+    )
 
 
     # sensor
@@ -162,3 +182,6 @@ class FrankaVisionBaseCfg(FrankaBaseDIOLEnvCfg):
     )
 
     num_cam: int = 3
+
+    pcd_marker = RAY_CASTER_MARKER_CFG.replace(prim_path="Visuals/PointClouds")
+    pcd_marker.markers["hit"].radius = 0.003
