@@ -244,7 +244,7 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
         self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
         self.pcd_marker.visualize(translations=self.sampled_points.reshape(-1, 3))
-        self.goal_pcd_marker.visualize(translations=self.goal_flow.reshape(-1, 3))
+        # self.goal_pcd_marker.visualize(translations=transformed_points.reshape(-1, 3))
     
 
     def sample_discrete_uniform(self,

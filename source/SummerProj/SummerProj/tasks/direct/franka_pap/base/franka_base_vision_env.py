@@ -77,8 +77,7 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         )
         centroid, axes, half_extent = bounds.compute_obb(obj_bb_cache, self.obj_prim.GetPrimPath().pathString)
         self.obj_corners = torch.from_numpy(bounds.get_obb_corners(centroid, axes, half_extent)).to(dtype=torch.float32, device=self.device)
-        
-
+    
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -109,23 +108,6 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
 
         self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
         self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)
-
-        # for env_id in env_ids.tolist():
-        #     prim_path = f"/World/envs/env_{env_id}/Object"
-
-        #     obj_bbox_cache = bounds.create_bbox_cache()
-        #     centroid, axes, half_extent = bounds.compute_obb(obj_bbox_cache, prim_path=prim_path)
-
-
-
-        # rot_noise = quat_from_angle_axis(torch.pi/2 * torch.ones(len(env_ids), device=self.device), self.y_unit_tensor) 
-        # # 난이도 고려, 회전 정보는 랜덤화 X
-        # default_obj_state = self._object.data.default_root_state[env_ids, :]
-        # default_obj_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :]
-        # default_obj_state[:, 3:7] = rot_noise
-        # # object 상태 업데이트
-        # self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
-        # self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)
 
         
 
