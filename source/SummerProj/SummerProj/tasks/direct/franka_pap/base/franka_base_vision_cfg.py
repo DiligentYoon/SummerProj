@@ -74,18 +74,18 @@ class FrankaVisionBaseCfg(FrankaBaseDIOLEnvCfg):
                 #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_1"]["url"],
                 #     scale=(0.01, 0.01, 0.01)
                 # ),
-                sim_utils.UsdFileCfg(
-                    usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_2"]["url"],
-                    scale=(0.01, 0.01, 0.01)
-                ),
+                # sim_utils.UsdFileCfg(
+                #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["mug_2"]["url"],
+                #     scale=(0.01, 0.01, 0.01)
+                # ),
                 # sim_utils.UsdFileCfg(
                 #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_1"]["url"],
                 #     scale=(0.01, 0.01, 0.01)
                 # ),
-                # sim_utils.UsdFileCfg(
-                #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_2"]["url"],
-                #     scale=(0.01, 0.01, 0.01)
-                # ),
+                sim_utils.UsdFileCfg(
+                    usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cube_2"]["url"],
+                    scale=(0.01, 0.01, 0.01)
+                ),
                 # sim_utils.UsdFileCfg(
                 #     usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["cylinder_1"]["url"],
                 #     scale=(0.01, 0.01, 0.01)
