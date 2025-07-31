@@ -49,13 +49,9 @@ class FrankaBaseDIOLEnv(DirectDIOL):
         self.robot_dof_damping_lower_limits = torch.tensor(self.cfg.imp_controller.damping_ratio_limits[0], device=self.device)
         self.robot_dof_damping_upper_limits = torch.tensor(self.cfg.imp_controller.damping_ratio_limits[1], device=self.device)
 
-        # Default Object and Robot Pose
+        # Default Robot Pose
         self.robot_joint_pos = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
         self.robot_joint_vel = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
-        self.object_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
-        self.object_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
-        self.object_linvel = torch.zeros((self.num_envs, 3), device=self.device)
-        self.object_angvel = torch.zeros((self.num_envs, 3), device=self.device)
 
         # Default TCP Offset
         self.tcp_offset = torch.tensor([0.0, 0.0, 0.045], device=self.device).repeat([self.scene.num_envs, 1])

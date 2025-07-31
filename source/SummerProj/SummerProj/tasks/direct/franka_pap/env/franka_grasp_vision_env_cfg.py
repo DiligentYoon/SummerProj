@@ -20,7 +20,7 @@ class FrankaGraspVisionEnvCfg(FrankaVisionBaseCfg):
     # camera
     # num_feature = 7 # (x,y,z, gx, gy, gz, label) -> object and background
     num_feature = 6 # (x,y,z, gx, gy, gz) -> only object
-    num_obj_points = 300
+    num_obj_points = 400
     num_bg_points = 1000
 
     

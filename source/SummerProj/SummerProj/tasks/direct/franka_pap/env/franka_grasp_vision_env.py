@@ -33,9 +33,14 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         self.goal_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.goal_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
 
-        # Robot and Object Grasp Poses
+        # Robot Grasp and Object Poses
         self.robot_grasp_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.robot_grasp_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
+        self.object_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
+        self.object_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
+        self.object_linvel = torch.zeros((self.num_envs, 3), device=self.device)
+        self.object_angvel = torch.zeros((self.num_envs, 3), device=self.device)
+        
 
         # Object Move Checker & Success Checker
         self.prev_loc_error = torch.zeros(self.num_envs, device=self.device)
@@ -121,6 +126,26 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         return terminated, truncated
         
     def _get_rewards(self):
+        action_norm = torch.norm(self.actions[:, 6:13], dim=1)
+        # =========== Approach Reward (1-1): Potential Based Reward Shaping by log scale =============
+        gamma = 1.0
+        phi_s_prime = -torch.log(self.cfg.alpha * self.loc_error + 1)
+        phi_s = -torch.log(self.cfg.alpha * self.prev_loc_error + 1)
+
+        phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
+        phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
+
+        r_pos = gamma*phi_s_prime - phi_s 
+        r_rot = gamma*phi_s_prime_rot - phi_s_rot
+
+        # =========== Success Reward : Goal Reach ============
+        r_success = self.is_reach.float()
+        
+        # =========== Summation =============
+        reward = self.cfg.w_pos * r_pos + \
+                 self.cfg.w_rot * r_rot - \
+                 self.cfg.w_penalty * action_norm + \
+                 self.cfg.w_success * r_success
 
         reward = -1 * torch.ones((self.num_envs, 1), device=self.device)
 
@@ -155,7 +180,7 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         )
 
         self.extras["high_level_obs"] = torch.cat([self.sampled_points,
-                                                   self.sampled_points], dim=-1)
+                                                   self.goal_flow], dim=-1)
         self.extras["high_level_reward"] = torch.zeros((self.num_envs, 1), dtype=torch.float32, device=self.device)
 
         return {"policy": obs}
