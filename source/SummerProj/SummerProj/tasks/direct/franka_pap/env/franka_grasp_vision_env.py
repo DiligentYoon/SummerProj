@@ -231,13 +231,15 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
                                                                                                        num_bg=self.cfg.num_bg_points,
                                                                                                        only_obj=True)
             
-            # Goal Flow를 위해 임의의 Goal Position 생성
+            # Goal Flow를 위해 Point Clouds의 Goal Position 생성
             # 현재는 위치에 대해서만 수행 -> 수직으로 들어올리는 Grasp Task
-            self.goal_flow[env_ids] = transform_points(self.sampled_points[env_ids], 
-                                                       position=(0.0, 0.0, 0.5),
-                                                       orientation=(1.0, 0.0, 0.0, 0.0), 
-                                                       device=self.device)
-        
+            transformed_points = transform_points(self.sampled_points[env_ids], 
+                                                  position=(0.0, 0.0, 0.5),
+                                                  orientation=(1.0, 0.0, 0.0, 0.0), 
+                                                  device=self.device)
+            
+            self.goal_flow[env_ids] = transformed_points - torch.mean(transformed_points, dim=-1).unsqueeze(-1)
+                                   
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
         self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
