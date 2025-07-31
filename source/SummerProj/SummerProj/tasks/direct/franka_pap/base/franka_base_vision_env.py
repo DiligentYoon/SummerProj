@@ -97,9 +97,9 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         # 난이도 고려, 회전 정보는 일단 그대로
         default_obj_state = self._object.data.default_root_state[env_ids, :]
-        default_obj_state[:, :3] += loc_noise
+        # default_obj_state[:, :3] += loc_noise
         default_obj_state[:, :2] += self.scene.env_origins[:, :2]
-        default_obj_state[:, 2] = -0.1
+        default_obj_state[:, 2] = -0.3
         # object 상태 업데이트
         self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
         self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)
