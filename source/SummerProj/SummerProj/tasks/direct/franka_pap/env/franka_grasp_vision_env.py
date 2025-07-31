@@ -10,7 +10,8 @@ import torch
 from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms, \
                                 combine_frame_transforms, quat_from_angle_axis, quat_mul, quat_inv, sample_uniform, saturate, \
                                 matrix_from_quat, quat_apply
-from isaaclab.sensors.camera.utils import create_pointcloud_from_depth, convert_to_torch
+
+from isaaclab.sensors.camera.utils import create_pointcloud_from_depth, transform_points
 from isaaclab.markers import VisualizationMarkers
 
 from ..base.franka_base_vision_env import FrankaVisionBaseEnv
@@ -44,8 +45,9 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         self.is_grasp = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         # Vision Info
-        self.sampled_points = torch.zeros((self.num_envs, self.cfg.num_obj_points, 3), dtype=torch.float32, device=self.device)
+        self.sampled_points = torch.zeros((self.num_envs, self.cfg.num_obj_points, 3), device=self.device)
         self.sampled_labels = torch.zeros((self.num_envs, self.cfg.num_obj_points, 1), dtype=torch.long, device=self.device)
+        self.goal_flow = torch.zeros((self.num_envs, self.cfg.num_obj_points, 3), device=self.device)
 
         # High Level Info
         self.extras["high_level_obs"] = torch.zeros((self.num_envs, 
@@ -56,6 +58,7 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
         self.pcd_marker = VisualizationMarkers(self.cfg.pcd_marker)
+        self.goal_pcd_marker = VisualizationMarkers(self.cfg.pcd_marker)
 
 
     # ================= Impedance Control Gain =================
@@ -170,7 +173,6 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         if env_ids is None:
             env_ids = self._robot._ALL_INDICES
 
-
         # ========= TCP 업데이트 ===========
         root_pos_w = self._robot.data.root_state_w[env_ids, :7]
         hand_pos_w = self._robot.data.body_state_w[env_ids, self.hand_link_idx, :7]
@@ -193,6 +195,8 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
         
         # ======== Vision Data 업데이트 =========
         if is_reset:
+            # Vision Update를 위한 Single Rendering Step
+            self.sim.render()
             all_clouds = []
             all_labels = []
             for i, cam in enumerate(self.cam_list):
@@ -226,11 +230,19 @@ class FrankaGraspVisionEnv(FrankaVisionBaseEnv):
                                                                                                        num_obj=self.cfg.num_obj_points,
                                                                                                        num_bg=self.cfg.num_bg_points,
                                                                                                        only_obj=True)
+            
+            # Goal Flow를 위해 임의의 Goal Position 생성
+            # 현재는 위치에 대해서만 수행 -> 수직으로 들어올리는 Grasp Task
+            self.goal_flow[env_ids] = transform_points(self.sampled_points[env_ids], 
+                                                       position=(0.0, 0.0, 0.5),
+                                                       orientation=(1.0, 0.0, 0.0, 0.0), 
+                                                       device=self.device)
         
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
         self.target_marker.visualize(self.goal_pos_w[:, :3], self.goal_pos_w[:, 3:7])
         self.pcd_marker.visualize(translations=self.sampled_points.reshape(-1, 3))
+        self.goal_pcd_marker.visualize(translations=self.goal_flow.reshape(-1, 3))
     
 
     def sample_discrete_uniform(self,
