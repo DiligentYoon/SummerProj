@@ -8,6 +8,9 @@ from __future__ import annotations
 import torch
 from abc import abstractmethod
 
+import omni.usd
+from pxr import Sdf
+
 from isaaclab.sensors import TiledCamera
 from isaaclab.assets import RigidObject
 from isaaclab.utils.math import sample_uniform
@@ -52,7 +55,7 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         self.scene.sensors["left_cam"] = self.cam_list[1]
         self.scene.sensors["right_cam"] = self.cam_list[2]
 
-        self.scene.clone_environments(copy_from_source=True)
+        self.scene.clone_environments(copy_from_source=False)
 
         # Spawn Light
         light_cfg = self.cfg.dome_light.spawn
@@ -69,7 +72,6 @@ class FrankaVisionBaseEnv(FrankaBaseDIOLEnv):
         default_obj_state = self._object.data.default_root_state[env_ids, :]
         default_obj_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
         # object 상태 업데이트
-        self._object.reset(env_ids)
         self._object.write_root_pose_to_sim(default_obj_state[:, :7], env_ids=env_ids)
         self._object.write_root_velocity_to_sim(default_obj_state[:, 7:], env_ids=env_ids)
         # Reset Robot 
