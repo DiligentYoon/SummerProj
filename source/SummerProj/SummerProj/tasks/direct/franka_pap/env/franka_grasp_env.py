@@ -54,6 +54,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
                             [self.cfg.reset_position_noise_x, self.cfg.reset_position_noise_y],
                             device=self.device,)
         
+
+        # metric
+        self.extras["epi_success_rate"] = torch.zeros(self.num_envs, device=self.device)
+        self.extras["grasp_success_rate"] = torch.zeros(self.num_envs, device=self.device)
+
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
 
@@ -110,6 +115,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = self.processed_actions[:, self.num_active_joints : 2*self.num_active_joints]
         self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = self.processed_actions[:, 2*self.num_active_joints : 3*self.num_active_joints]
         self.imp_controller.set_command(self.imp_commands)
+
+        # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
+        self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
+                                               joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
+        
+        act = self.actions[:, 21]
+        # print(f"Gripper Commands : {act}")
         
 
     def _apply_action(self) -> None:
@@ -152,10 +164,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ===== Target Torque 버퍼에 저장 =====
         self._robot.set_joint_effort_target(des_torque, joint_ids=self.joint_idx)
 
-        # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
-        self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
-                                               joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
-
         
         
     def _get_dones(self):
@@ -165,6 +173,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # print(f"Reach : {self.is_reach.float()}")
         # print(f"Distance : {self.loc_error}")
+        self.extras["epi_success_rate"] = terminated.float()
+        self.extras["grasp_success_rate"] = self.is_grasp.float()
+
         return terminated, truncated
         
     def _get_rewards(self):
@@ -212,7 +223,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         # =========== Summation =============
         reward = self.cfg.w_pos * r_pos             + \
-                 self.cfg.w_reach * r_reach         + \
                  self.cfg.w_grasp * r_grasp         + \
                  self.cfg.w_pos_retract * r_retract - \
                  self.cfg.w_contact * p_contact
@@ -245,8 +255,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 self.object_pos_b,
                 # object position w.r.t TCP frame (7)
                 goal_pos_tcp,
-                # object width(1)
-                self.obj_width,
                 # object goal position w.r.t Root Frame (3)
                 self.object_target_loc_b
             ), dim=1
@@ -273,15 +281,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # object(=target point) reset : Rotation -> Z-axis Randomization
         rot_noise_z = sample_uniform(-1.0, 1.0, (len(env_ids), ), device=self.device)
         object_default_state[:, 3:7] = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
-
-        # Convert from World to Root Frame
-        root_pos_w = self._robot.data.root_state_w[env_ids, :7]
-        obj_loc_b, obj_rot_b = subtract_frame_transforms(
-            root_pos_w[:, :3], root_pos_w[:, 3:7], object_default_state[:, :3], object_default_state[:, 3:7])
-
-        # Setting Object Pose
-        self.object_pos_w[env_ids] = object_default_state[:, :7]
-        self.object_pos_b[env_ids] = torch.cat([obj_loc_b, obj_rot_b], dim=-1)
 
         # Setting Final Goal 3D Location
         self.object_target_loc_w[env_ids] = self.object_pos_w[env_ids, :3] + self.z_unit_tensor[env_ids]
@@ -329,14 +328,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > 5e-2)
         self.prev_retract_error[env_ids] = self.retract_error[env_ids]
         self.retract_error[env_ids] = torch.norm(
-        self.object_pos_b[env_ids, :3] - self.object_target_loc_b[env_ids, :3], dim=1)
+            self.object_pos_b[env_ids, :3] - self.object_target_loc_b[env_ids, :3], dim=1)
             
-
-            
-        
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
+        # self.target_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:

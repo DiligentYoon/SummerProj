@@ -110,6 +110,8 @@ def run_simulator(sim : sim_utils.SimulationContext, scene : InteractiveScene):
     left_marker = VisualizationMarkers(frame_marker_cfg.replace(prim_path="/Visuals/left_finger"))
     left_finger_link_idx = robot.find_bodies("panda_leftfinger")[0][0]
     right_finger_link_idx = robot.find_bodies("panda_rightfinger")[0][0]
+    left_finger_joint_idx = robot.find_joints("panda_finger_joint1")[0][0]
+    right_finger_joint_idx = robot.find_joints("panda_finger_joint2")[0][0]
 
     # Relative Impedance Controller
     joint_imp_cfg = JointImpedanceControllerCfg(command_type="p_rel", 
@@ -131,6 +133,7 @@ def run_simulator(sim : sim_utils.SimulationContext, scene : InteractiveScene):
     kp_table = torch.tensor([100, 300, 300, 300, 80, 80, 80], device=scene.device)
     zeta         = 0.3                       # Damping ratio(=가상 댐퍼 비율)
     joint_limits = robot.data.joint_pos_limits
+    gripper_commands = (0.02 * torch.sin(torch.linspace(0, 2*torch.pi, 100)) + 0.02).reshape(-1, 1).to(sim.device)
 
     # ---------- 슬라이스 정의 ----------
     pos_slice       = slice(0, n_j)
@@ -194,7 +197,10 @@ def run_simulator(sim : sim_utils.SimulationContext, scene : InteractiveScene):
                 # 4) 실제 Torque 신호 내부 버퍼에 저장 -> 액추에이터 모델로부터 최종 토크 계산 위함
                 #### 만약, Direct로 Effort를 줄 생각이면, 액추에이터 쪽 PD제어 로직을 꺼야한다.
                 ####################################################################################
+                k = count % gripper_commands.shape[0]
                 robot.set_joint_effort_target(tau, joint_ids=joint_ids)
+                robot.set_joint_position_target(gripper_commands[k].reshape(-1, 1).repeat(1, 2), joint_ids=[left_finger_joint_idx, right_finger_joint_idx])
+                print(f"gripper command : {gripper_commands[k]}")
 
                 # 타겟 조인트 포지션 버퍼에 저장 -> 실제 액추에이터 PD제어기로 인해 토크 계산을 위함
                 # robot.set_joint_position_target(default_joint_pos[:, :n_j], joint_ids=robot_entity_cfg.joint_ids)
@@ -212,7 +218,7 @@ def run_simulator(sim : sim_utils.SimulationContext, scene : InteractiveScene):
             right_finger_pos_w = robot.data.body_state_w[:, right_finger_link_idx, :7]
             left_marker.visualize(left_finger_pos_w[:, :3], left_finger_pos_w[:, 3:7])
             width = torch.norm(left_finger_pos_w[:, :3] - right_finger_pos_w[:, :3])
-            print(f"gripper width : {width}")
+            # print(f"gripper width : {width}")
 
 
     elif args_cli.test_mode == "plotting":
