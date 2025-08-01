@@ -56,8 +56,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
 
         # metric
-        self.extras["epi_success_rate"] = torch.zeros(self.num_envs, device=self.device)
-        self.extras["grasp_success_rate"] = torch.zeros(self.num_envs, device=self.device)
+        self.extras["log"] = {
+            "epi_success_rate": torch.zeros(self.num_envs, device=self.device),
+            "grasp_success_rate": torch.zeros(self.num_envs, device=self.device)
+        }
 
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
@@ -173,8 +175,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # print(f"Reach : {self.is_reach.float()}")
         # print(f"Distance : {self.loc_error}")
-        self.extras["epi_success_rate"] = terminated.float()
-        self.extras["grasp_success_rate"] = self.is_grasp.float()
+        self.extras["log"]["epi_success_rate"] = torch.sum(terminated.float()) / self.num_envs
+        self.extras["log"]["grasp_success_rate"] = torch.sum(self.is_grasp.float()) / self.num_envs
 
         return terminated, truncated
         
@@ -271,23 +273,29 @@ class FrankaGraspEnv(FrankaBaseEnv):
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         object_default_state = self._object.data.default_root_state[env_ids]
         object_default_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
-    
+
         # object(=target point) reset : Rotation -> Z-axis Randomization
         rot_noise_z = sample_uniform(-1.0, 1.0, (len(env_ids), ), device=self.device)
         object_default_state[:, 3:7] = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
 
+        # Pose calculation for root frame variables
+        object_default_pos_w = object_default_state[:, :7]
+        object_default_pos_b = torch.cat(subtract_frame_transforms(
+            self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7], 
+            object_default_pos_w[:, :3], object_default_pos_w[:, 3:7]), dim=1)
+
         # Setting Final Goal 3D Location
-        self.object_target_loc_w[env_ids] = self.object_pos_w[env_ids, :3] + self.z_unit_tensor[env_ids]
-        self.object_target_loc_b[env_ids] = self.object_pos_b[env_ids, :3] + self.z_unit_tensor[env_ids]
+        self.object_target_loc_w[env_ids] = object_default_pos_w[:, :3] + 0.2 * self.z_unit_tensor[env_ids]
+        self.object_target_loc_b[env_ids] = object_default_pos_b[:, :3] + 0.2 * self.z_unit_tensor[env_ids]
         
         self._object.write_root_pose_to_sim(object_default_state[:, :7], env_ids)
         self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)
-        
+
         # Need to refresh the intermediate values so that _get_observations() can use the latest values
         self._compute_intermediate_values(env_ids)
 
     
-    def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None):
+    def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None, reset: bool = False):
         if env_ids is None:
             env_ids = self._robot._ALL_INDICES
 
@@ -323,11 +331,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.object_pos_b[env_ids, :3] - self.object_target_loc_b[env_ids, :3], dim=1)
         # Phase Signal
         self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
-        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > 5e-2)
+        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > self.obj_width[0]/2)
             
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        # self.target_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
+        self.target_marker.visualize(self.object_target_loc_w[:, :3], self.object_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:
