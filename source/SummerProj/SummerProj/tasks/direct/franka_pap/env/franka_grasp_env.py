@@ -98,9 +98,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                        self.robot_dof_damping_lower_limits,
                                                        self.robot_dof_damping_upper_limits)
         
-        self.processed_actions[:, 21] = torch.clamp(self.actions[:, 21] * self.cfg.gripper_scale/2 + self.cfg.gripper_scale/2,
-                                                    0,
-                                                    self.cfg.gripper_scale)
+        # self.processed_actions[:, 21] = torch.clamp(self.actions[:, 21] * self.cfg.gripper_scale/2 + self.cfg.gripper_scale/2,
+        #                                             0,
+        #                                             self.cfg.gripper_scale)
+        
+        self.processed_actions[:, 21] = torch.where(self.actions[:, 21] > 0, 1.0, 0.0)
         
         # ===== Impedance Controller Parameter 세팅 =====
         self.imp_commands[:, :self.num_active_joints] = self.processed_actions[:, :self.num_active_joints] + \

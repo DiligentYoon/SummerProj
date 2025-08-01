@@ -77,4 +77,4 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     w_contact = 1.0
     w_pos_retract = 20.0
     w_grasp = 20.0
-    w_reach = 20.0
+    w_reach = 1.0
