@@ -151,7 +151,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self._robot.set_joint_effort_target(des_torque, joint_ids=self.joint_idx)
 
         # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
-        self._robot.set_joint_position_target(self.processed_actions[:, 21].repeat(2, 1), 
+        self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
                                                joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
         
         
