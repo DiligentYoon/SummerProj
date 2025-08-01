@@ -67,7 +67,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
             max_depenetration_velocity=5.0),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True, solver_position_iteration_count=12, solver_velocity_iteration_count=0),
-        collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+        # collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 0.0),
@@ -112,7 +112,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
 
     # stand
     stand = AssetBaseCfg(
-        prim_path="/World/envs/env_.*/stand",
+        prim_path="/World/envs/env_.*/Stand",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0, 0, 0.0]),
         spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.getcwd(), "Dataset", "mydata") + OBJECT_DIR["stand"]["url"],
                                    scale=(1.2, 1.2, 1.2),
@@ -140,12 +140,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
         damping_ratio_limits=(0, 1),
         inertial_compensation=True,
         gravity_compensation=True,)
-    
-    # IK controller
-    ik_controller = DifferentialIKControllerCfg = DifferentialIKControllerCfg(
-        command_type='pose',
-        use_relative_mode=False,
-        ik_method='dls',)
+
     
     # Scene entities
     robot_entity: SceneEntityCfg = SceneEntityCfg(
@@ -157,6 +152,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     joint_res_clipping = 0.2
     stiffness_scale = imp_controller.stiffness_limits[1]
     damping_scale = imp_controller.damping_ratio_limits[1]
+    gripper_scale = 0.04
 
     # target point reset
     reset_position_noise_x = 0.1

@@ -22,8 +22,8 @@ parser = argparse.ArgumentParser(description="Train an RL agent with skrl.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
-parser.add_argument("--num_envs", type=int, default=3, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default="Franka-Reach-Direct-v0", help="Name of the task.")
+parser.add_argument("--num_envs", type=int, default=2, help="Number of environments to simulate.")
+parser.add_argument("--task", type=str, default="Franka-Grasp-Direct-v0", help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
@@ -102,27 +102,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import SummerProj.tasks  # noqa: F401
 
-
-# --- [수정 1] ---
-# 우리가 만든 커스텀 모델 클래스를 임포트합니다.
-# 이 경로는 사용자님의 프로젝트 구조에 맞게 정확해야 합니다.
-try:
-    from SummerProj.tasks.direct.franka_pap.agents.custom_net import FrankaGaussianPolicy, FrankaValue
-    # from source.SummerProj.SummerProj.tasks.direct.franka_pap.agents.custom_net import FrankaCustomActorCritic
-except ImportError:
-    # 이 부분은 코드가 다른 위치에 있을 경우를 대비한 예외처리입니다. 경로를 확인하세요.
-    print("Warning: Could not import FrankaCustomActorCritic. Make sure the path is correct.")
-    FrankaCustomActorCritic = None
-# --------------------
-
-# --- [수정 1-1] ---
-# skrl에서 PPO 에이전트와 Memory 클래스를 직접 임포트합니다.
-from skrl.agents.torch.ppo import PPO
-from skrl.memories.torch import RandomMemory
-from skrl.trainers.torch import SequentialTrainer
-from skrl.resources.schedulers.torch import KLAdaptiveLR
-from skrl.resources.preprocessors.torch import RunningStandardScaler
-# --------------------
+from runner import AISLRunner
 
 
 
@@ -207,7 +187,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
-    runner = Runner(env, agent_cfg)
+    runner = AISLRunner(env, agent_cfg)
 
     # load checkpoint (if specified)
     if resume_path:

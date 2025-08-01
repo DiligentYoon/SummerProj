@@ -151,6 +151,7 @@ class FrankaBaseDIOLEnvCfg(DirectDIOLCfg):
     joint_res_clipping = 0.2
     stiffness_scale = imp_controller.stiffness_limits[1]
     damping_scale = imp_controller.damping_ratio_limits[1]
+    gripper_scale = 0.04
 
     # target point reset
     reset_position_noise_x = 0.1

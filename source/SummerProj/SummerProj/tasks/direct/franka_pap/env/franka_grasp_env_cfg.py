@@ -21,8 +21,8 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # env
     episode_length_s = 8.0
     decimation = 10
-    action_space = 21
-    observation_space = 35
+    action_space = 22
+    observation_space = 43
     state_space = 0
 
     # simulation
@@ -41,10 +41,10 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # object
     object: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Object",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.35, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=[0.67, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
-                scale=(1.0, 1.0, 1.0),
+                scale=(1.5, 1.5, 1.5),
                 rigid_props=RigidBodyPropertiesCfg(
                     solver_position_iteration_count=16,
                     solver_velocity_iteration_count=1,
@@ -73,6 +73,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     alpha, beta = 3.0, 4.0
     w_pos = 50.0
     w_rot = 25.0
-    w_penalty = 0.01
-    w_contact = 0.1
-    w_success = 10.0
+    w_penalty = 1.0
+    w_contact = 1.0
+    w_pos_retract = 30.0
+    w_grasp = 10.0

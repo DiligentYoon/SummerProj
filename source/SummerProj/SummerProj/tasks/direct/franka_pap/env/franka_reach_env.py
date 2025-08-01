@@ -201,9 +201,9 @@ class FrankaReachEnv(FrankaBaseEnv):
 
         obs = torch.cat(
             (   
-                # robot joint pose (7 not 9)
+                # robot joint pose (9)
                 joint_pos_scaled[:, 0:self.num_active_joints],
-                # robot joint velocity (7 not 9)
+                # robot joint velocity (9)
                 self.robot_joint_vel[:, 0:self.num_active_joints],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,

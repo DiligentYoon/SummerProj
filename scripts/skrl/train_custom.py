@@ -24,7 +24,7 @@ parser.add_argument("--video", action="store_true", default=False, help="Record 
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
 parser.add_argument("--num_envs", type=int, default=2, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default="Franka-PickandPlace-Direct-v0", help="Name of the task.")
+parser.add_argument("--task", type=str, default="Franka-Grasp-Direct-v0", help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
@@ -104,6 +104,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 import SummerProj.tasks  # noqa: F401
 # from runner import AISLRunner
 from runner_diol import AISLDIOLRunner
+from runner import AISLRunner
 
 
 # config shortcuts
@@ -196,7 +197,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # ============= Custom Agent & Trainer 생성 ===============
     print("[INFO] Instantiating runner class via custom logic...")
-    runner = AISLDIOLRunner(env, agent_cfg)
+    runner = AISLRunner(env, agent_cfg)
     print("✅ [INFO] Runner and its components instantiated successfully!")
 
     # Checkpoint 로드

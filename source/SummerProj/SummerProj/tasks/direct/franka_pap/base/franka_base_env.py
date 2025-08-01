@@ -66,11 +66,6 @@ class FrankaBaseEnv(DirectRLEnv):
                                                        num_robots=self.num_envs,
                                                        dof_pos_limits=self._robot.data.soft_joint_pos_limits[:, 0:self.num_active_joints, :],
                                                        device=self.device)
-        
-        # IK Controller for Position Control
-        self.ik_controller = DifferentialIKController(cfg=self.cfg.ik_controller,
-                                                      num_envs=self.num_envs,
-                                                      device=self.device)
 
         # TCP Marker
         self.tcp_marker = VisualizationMarkers(self.cfg.tcp_cfg)
@@ -84,15 +79,21 @@ class FrankaBaseEnv(DirectRLEnv):
         self._robot = Articulation(self.cfg.robot)
         self.scene.articulations["robot"] = self._robot
 
-        # Ground와 Table은 따로 확실하게 Spawn
-        spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=self.cfg.plane.init_state.pos)
-        spawn = self.cfg.table.spawn
-        spawn.func(self.cfg.table.prim_path, spawn, translation=self.cfg.table.init_state.pos, orientation=(1.0, 0.0, 0.0, 0.0))
-        # clone and replicate
-        self.scene.clone_environments(copy_from_source=False)
 
-        # add lights
-        self.cfg.dome_light.spawn.func(self.cfg.dome_light.prim_path, self.cfg.dome_light)
+        # Spawn Ground
+        spawn_ground_plane(prim_path=self.cfg.plane.prim_path, cfg=GroundPlaneCfg(), translation=self.cfg.plane.init_state.pos)
+
+        # Spawn Stand
+        stand_cfg = self.cfg.stand.spawn
+        stand_cfg.func(self.cfg.stand.prim_path, stand_cfg,
+                       translation=self.cfg.stand.init_state.pos,
+                       orientation=(1.0, 0.0, 0.0, 0.0))
+        
+        # Spawn Table
+        table_cfg = self.cfg.table.spawn
+        table_cfg.func(self.cfg.table.prim_path, table_cfg, 
+                   translation=self.cfg.table.init_state.pos, 
+                   orientation=(1.0, 0.0, 0.0, 0.0),)
 
     
     def _reset_idx(self, env_ids: torch.Tensor | None):
