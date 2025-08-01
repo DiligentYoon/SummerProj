@@ -153,14 +153,18 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
         self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
                                                joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
+
         
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        self.is_reach = self.loc_error < 1e-2
+        self.is_reach = self.loc_error < 5e-2
         self.is_grasp = torch.logical_and(self.is_reach, self.object_pos_b[:, 2] > 5e-2)
         terminated = torch.logical_and(self.is_grasp, self.retract_error < 1e-2)
         truncated = self.episode_length_buf >= self.max_episode_length - 1
+
+        # print(f"Reach : {self.is_reach.float()}")
+        # print(f"Distance : {self.loc_error}")
         return terminated, truncated
         
     def _get_rewards(self):
@@ -191,6 +195,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # r_rot = gamma*phi_s_prime_rot - phi_s_rot
 
         # =========== Phase Bonus : Object Grasping ===========
+        # 0. reach Bonus
+        r_reach = self.is_reach.float()
+        
         # 1. Grasp Bonus
         r_grasp = self.is_grasp.float()    
 
@@ -205,6 +212,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         # =========== Summation =============
         reward = self.cfg.w_pos * r_pos             + \
+                 self.cfg.w_reach * r_reach         + \
                  self.cfg.w_grasp * r_grasp         + \
                  self.cfg.w_pos_retract * r_retract - \
                  self.cfg.w_penalty * gripper_norm  - \
@@ -265,7 +273,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
     
         # object(=target point) reset : Rotation -> Z-axis Randomization
         rot_noise_z = sample_uniform(-1.0, 1.0, (len(env_ids), ), device=self.device)
-        object_default_state[:, 3:7] = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor)
+        object_default_state[:, 3:7] = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
 
         # Convert from World to Root Frame
         root_pos_w = self._robot.data.root_state_w[env_ids, :7]
@@ -277,8 +285,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.object_pos_b[env_ids] = torch.cat([obj_loc_b, obj_rot_b], dim=-1)
 
         # Setting Final Goal 3D Location
-        self.object_target_loc_w[env_ids] = self.object_pos_w[env_ids, :3] + self.z_unit_tensor
-        self.object_target_loc_b[env_ids] = self.object_pos_b[env_ids, :3] + self.z_unit_tensor
+        self.object_target_loc_w[env_ids] = self.object_pos_w[env_ids, :3] + self.z_unit_tensor[env_ids]
+        self.object_target_loc_b[env_ids] = self.object_pos_b[env_ids, :3] + self.z_unit_tensor[env_ids]
         
         self._object.write_root_pose_to_sim(object_default_state[:, :7], env_ids)
         self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)

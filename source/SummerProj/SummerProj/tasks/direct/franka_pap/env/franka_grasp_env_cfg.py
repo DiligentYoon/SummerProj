@@ -19,7 +19,7 @@ from ..base.franka_base_env_cfg import FrankaBaseEnvCfg
 @configclass
 class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # env
-    episode_length_s = 8.0
+    episode_length_s = 7.0
     decimation = 10
     action_space = 22
     observation_space = 43
@@ -44,7 +44,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
         init_state=RigidObjectCfg.InitialStateCfg(pos=[0.67, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
-                scale=(1.5, 1.5, 1.5),
+                scale=(1.0, 1.0, 1.0),
                 rigid_props=RigidBodyPropertiesCfg(
                     solver_position_iteration_count=16,
                     solver_velocity_iteration_count=1,
@@ -71,9 +71,10 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
 
     # reward hyperparameter
     alpha, beta = 3.0, 4.0
-    w_pos = 25.0
+    w_pos = 50.0
     w_rot = 25.0
     w_penalty = 0.5
     w_contact = 1.0
-    w_pos_retract = 30.0
+    w_pos_retract = 20.0
     w_grasp = 20.0
+    w_reach = 20.0
