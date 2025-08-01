@@ -211,10 +211,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
                  self.cfg.w_contact * p_contact
                  
 
-
-        # print(f"reward of env1 : {reward[0]}")
-        # print(f"--------------------------------------")
-
         return reward
     
     def _get_observations(self):
