@@ -102,7 +102,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #                                             0,
         #                                             self.cfg.gripper_scale)
         
-        self.processed_actions[:, 21] = torch.where(self.actions[:, 21] > 0, 1.0, 0.0)
+        self.processed_actions[:, 21] = torch.where(self.actions[:, 21] > 0, 0.04, 0.0)
         
         # ===== Impedance Controller Parameter 세팅 =====
         self.imp_commands[:, :self.num_active_joints] = self.processed_actions[:, :self.num_active_joints] + \
@@ -160,8 +160,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        self.is_reach = self.loc_error < 5e-2
-        self.is_grasp = torch.logical_and(self.is_reach, self.object_pos_b[:, 2] > 5e-2)
         terminated = torch.logical_and(self.is_grasp, self.retract_error < 1e-2)
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
@@ -171,7 +169,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_rewards(self):
         # Action Penalty
-        gripper_norm = torch.abs(self.actions[:, 21])
+        # gripper_norm = torch.abs(self.actions[:, 21])
         # action_norm = torch.norm(self.actions[:, 7:14], dim=1)
 
         # # =========== Approach Reward (1): Potential Based Reward Shaping =============
@@ -217,7 +215,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
                  self.cfg.w_reach * r_reach         + \
                  self.cfg.w_grasp * r_grasp         + \
                  self.cfg.w_pos_retract * r_retract - \
-                 self.cfg.w_penalty * gripper_norm  - \
                  self.cfg.w_contact * p_contact
                  
 
@@ -327,11 +324,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # Rotation
         self.prev_rot_error[env_ids] = self.rot_error[env_ids]
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], self.object_pos_b[env_ids, 3:7])
-        # Retract
-        if self.is_grasp[env_ids].any():
-            self.prev_retract_error[env_ids] = self.retract_error[env_ids]
-            self.retract_error[env_ids] = torch.norm(
-                self.object_pos_b[env_ids, :3] - self.object_target_loc_b[env_ids, :3], dim=1)
+        # Metrics
+        self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
+        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > 5e-2)
+        self.prev_retract_error[env_ids] = self.retract_error[env_ids]
+        self.retract_error[env_ids] = torch.norm(
+        self.object_pos_b[env_ids, :3] - self.object_target_loc_b[env_ids, :3], dim=1)
             
 
             
