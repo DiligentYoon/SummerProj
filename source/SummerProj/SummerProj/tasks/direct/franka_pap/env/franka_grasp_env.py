@@ -331,7 +331,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.object_pos_b[env_ids, :3] - self.object_target_loc_b[env_ids, :3], dim=1)
         # Phase Signal
         self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
-        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > self.obj_width[0]/2)
+        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
             
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
