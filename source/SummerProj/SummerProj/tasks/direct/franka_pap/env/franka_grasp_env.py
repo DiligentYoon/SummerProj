@@ -120,7 +120,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
                                                joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
         
-        act = self.actions[:, 21]
+        # act = self.actions[:, 21]
         # print(f"Gripper Commands : {act}")
         
 
@@ -206,26 +206,20 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # r_rot = gamma*phi_s_prime_rot - phi_s_rot
 
         # =========== Phase Bonus : Object Grasping ===========
-        # 0. reach Bonus
-        r_reach = self.is_reach.float()
-        
         # 1. Grasp Bonus
         r_grasp = self.is_grasp.float()    
 
-        # 2. Retract Error Bonus
-        phi_s_prime_ret = -torch.log(self.cfg.alpha * self.retract_error + 1)
-        phi_s_ret = -torch.log(self.cfg.alpha * self.prev_retract_error + 1)
-        r_retract = r_grasp * (gamma * phi_s_prime_ret - phi_s_ret)
+        # 2. Retract Error Bonus (단일 거리)
+        r_retract = r_grasp * (1 - torch.tanh(self.retract_error / 0.3))
     
 
         # =========== Contact Penalty =================
-        p_contact = torch.logical_and(~self.is_grasp, torch.norm(self._object.data.root_vel_w, dim=1) > 1e-1)
+        # p_contact = torch.logical_and(~self.is_grasp, torch.norm(self._object.data.root_vel_w, dim=1) > 1e-1)
         
         # =========== Summation =============
         reward = self.cfg.w_pos * r_pos             + \
                  self.cfg.w_grasp * r_grasp         + \
-                 self.cfg.w_pos_retract * r_retract - \
-                 self.cfg.w_contact * p_contact
+                 self.cfg.w_pos_retract * r_retract
                  
 
         return reward
@@ -323,12 +317,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # Rotation
         self.prev_rot_error[env_ids] = self.rot_error[env_ids]
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], self.object_pos_b[env_ids, 3:7])
-        # Metrics
-        self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
-        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > 5e-2)
+        # Retract
         self.prev_retract_error[env_ids] = self.retract_error[env_ids]
         self.retract_error[env_ids] = torch.norm(
             self.object_pos_b[env_ids, :3] - self.object_target_loc_b[env_ids, :3], dim=1)
+        # Phase Signal
+        self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
+        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > 5e-2)
             
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
