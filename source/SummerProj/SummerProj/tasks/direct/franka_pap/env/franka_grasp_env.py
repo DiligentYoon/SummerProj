@@ -63,10 +63,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         }
         self.success_buffer = collections.deque(maxlen=100) # 최근 100개 에피소드 결과 저장
         self.grasp_buffer = collections.deque(maxlen=100) # 최근 100개 에피소드 결과 저장   
-        self.cumulative_episode_success = 0
-        self.cumulative_grasp_sucess = 0
-        self.log_interval = 10
-        self.log_step = 0
 
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
@@ -231,29 +227,35 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # 1. Grasp Bonus
         r_grasp = self.is_grasp.float()
 
-        # 2. Retract Error Bonus (단일 거리)
+        # 2. Retract Error Bonus
         phi_s_prime_retract_loc = -torch.log(self.cfg.alpha * self.retract_error[:, 0] + 1)
         phi_s_prime_retract_rot = -torch.log(self.cfg.alpha * self.retract_error[:, 1] + 1)
         phi_s_retract_loc = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 0] + 1)
         phi_s_retract_rot = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 1] + 1)
 
-        r_retract_loc = r_grasp * (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
-        r_retract_rot = r_grasp * (gamma * phi_s_prime_retract_rot - phi_s_retract_rot) 
+        r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
+        # r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot) 
 
         # print(f"retract loc : {r_retract_loc}")
         # print(f"retract rot : {r_retract_rot}")
     
 
         # =========== Contact Penalty =================
-        # p_contact = torch.logical_and(~self.is_grasp, torch.norm(self._object.data.root_vel_w, dim=1) > 1e-1)
+        p_contact = torch.logical_and(~self.is_grasp, torch.norm(self._object.data.root_vel_w, dim=1) > 1e-1)
         
         # =========== Summation =============
-        reward = self.cfg.w_pos * r_pos             + \
-                 self.cfg.w_grasp * r_grasp         + \
-                 self.cfg.w_pos_retract * r_retract_loc + \
-                 self.cfg.w_pos_retract * r_retract_rot
-                 
+        reward = torch.where(self.is_grasp,
+                             self.cfg.w_pos_retract * r_retract_loc,
+                             self.cfg.w_pos * r_pos)
 
+
+        # reward = self.cfg.w_pos * r_pos             + \
+        #          self.cfg.w_grasp * r_grasp         + \
+        #          self.cfg.w_pos_retract * r_retract_loc + \
+        #          self.cfg.w_pos_retract * r_retract_rot
+
+        reward += (self.cfg.w_grasp * r_grasp - self.cfg.w_contact * p_contact)
+                 
         return reward
     
     def _get_observations(self):
@@ -272,7 +274,33 @@ class FrankaGraspEnv(FrankaBaseEnv):
         goal_pos_tcp = torch.cat(subtract_frame_transforms(
             self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7]), dim=1)
 
+        current_goal_info_b = torch.where(self.is_grasp.unsqueeze(-1),
+                                          self.object_target_pos_b,
+                                          self.object_pos_b)
+        current_goal_info_tcp = torch.where(self.is_grasp.unsqueeze(-1),
+                                            goal_pos_tcp,
+                                            object_pos_tcp)
 
+        # obs = torch.cat(
+        #     (   
+        #         # robot joint pose (9)
+        #         joint_pos_scaled[:, 0:self.num_active_joints+2],
+        #         # robot joint velocity (9)
+        #         self.robot_joint_vel[:, 0:self.num_active_joints+2],
+        #         # TCP 6D pose w.r.t Root frame (7)
+        #         self.robot_grasp_pos_b,
+        #         # object position w.r.t Root frame (7)
+        #         self.object_pos_b,
+        #         # object position w.r.t TCP frame (7)
+        #         object_pos_tcp,
+        #         # object goal position w.r.t Root Frame (7)
+        #         self.object_target_pos_b,
+        #         # object goal position w.r.t TCP frame (7)
+        #         goal_pos_tcp,
+        #         # Current Phase Info (1)
+        #         self.is_grasp.unsqueeze(-1)
+        #     ), dim=1
+        # )
         obs = torch.cat(
             (   
                 # robot joint pose (9)
@@ -281,14 +309,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 self.robot_joint_vel[:, 0:self.num_active_joints+2],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,
-                # object position w.r.t Root frame (7)
-                self.object_pos_b,
-                # object position w.r.t TCP frame (7)
-                object_pos_tcp,
-                # object goal position w.r.t Root Frame (7)
-                self.object_target_pos_b,
-                # object goal position w.r.t TCP frame (7)
-                goal_pos_tcp,
+                # Goal Info w.r.t body frame (7)
+                current_goal_info_b,
+                # Goal Info w.r.t root frame (7)
+                current_goal_info_tcp,
                 # Current Phase Info (1)
                 self.is_grasp.unsqueeze(-1)
             ), dim=1
