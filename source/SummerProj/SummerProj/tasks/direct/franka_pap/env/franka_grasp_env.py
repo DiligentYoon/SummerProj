@@ -186,13 +186,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
             for env_id in done_env_ids:
                 self.success_buffer.append(terminated[env_id].float().item())
                 self.grasp_buffer.append(self.is_grasp[env_id].float().item())
-        
-        if len(self.success_buffer) > 0:
-            self.extras["log"]["epi_success_rate"] = sum(self.success_buffer) / len(self.success_buffer)
-
-        if len(self.grasp_buffer) > 0:
-            self.extras["log"]["grasp_success_rate"] = sum(self.grasp_buffer) / len(self.grasp_buffer)
-
 
         return terminated, truncated
         
@@ -280,6 +273,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
         current_goal_info_tcp = torch.where(self.is_grasp.unsqueeze(-1),
                                             goal_pos_tcp,
                                             object_pos_tcp)
+        
+        if len(self.success_buffer) > 0:
+            self.extras["log"]["epi_success_rate"] = torch.tensor(sum(self.success_buffer) / len(self.success_buffer), device=self.device)
+
+        if len(self.grasp_buffer) > 0:
+            self.extras["log"]["grasp_success_rate"] = torch.tensor(sum(self.grasp_buffer) / len(self.grasp_buffer), device=self.device)
 
         # obs = torch.cat(
         #     (   
