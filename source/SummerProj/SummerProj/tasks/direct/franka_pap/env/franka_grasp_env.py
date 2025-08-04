@@ -288,7 +288,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 # object goal position w.r.t Root Frame (7)
                 self.object_target_pos_b,
                 # object goal position w.r.t TCP frame (7)
-                goal_pos_tcp
+                goal_pos_tcp,
+                # Current Phase Info (1)
+                self.is_grasp
             ), dim=1
         )
 
@@ -303,8 +305,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ============ Target Point 리셋 ===============
         # object(=target point) reset : Location
-        loc_noise_x = sample_uniform(-0.2, 0.2, (len(env_ids), 1), device=self.device)
-        loc_noise_y = sample_uniform(-0.4, 0.4, (len(env_ids), 1), device=self.device)
+        loc_noise_x = sample_uniform(-0.15, 0.15, (len(env_ids), 1), device=self.device)
+        loc_noise_y = sample_uniform(-0.3, 0.3, (len(env_ids), 1), device=self.device)
         loc_noise_z = torch.full((len(env_ids), 1), self.obj_width[0].item()/2, device=self.device)
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         object_default_state = self._object.data.default_root_state[env_ids]
