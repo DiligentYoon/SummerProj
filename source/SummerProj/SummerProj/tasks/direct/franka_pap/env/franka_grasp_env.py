@@ -290,7 +290,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 # object goal position w.r.t TCP frame (7)
                 goal_pos_tcp,
                 # Current Phase Info (1)
-                self.is_grasp
+                self.is_grasp.unsqueeze(-1)
             ), dim=1
         )
 
@@ -373,7 +373,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:
