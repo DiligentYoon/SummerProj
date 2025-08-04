@@ -240,8 +240,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         r_retract_loc = r_grasp * (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
         r_retract_rot = r_grasp * (gamma * phi_s_prime_retract_rot - phi_s_retract_rot) 
 
-        print(f"retract loc : {r_retract_loc}")
-        print(f"retract rot : {r_retract_rot}")
+        # print(f"retract loc : {r_retract_loc}")
+        # print(f"retract rot : {r_retract_rot}")
     
 
         # =========== Contact Penalty =================
@@ -373,7 +373,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:

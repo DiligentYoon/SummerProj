@@ -75,6 +75,6 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     w_rot = 25.0
     w_penalty = 0.5
     w_contact = 1.0
-    w_pos_retract = 30.0
-    w_grasp = 5.0
+    w_pos_retract = 40.0
+    w_grasp = 10.0
     w_reach = 1.0
