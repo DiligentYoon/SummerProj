@@ -49,6 +49,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_grasp = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.is_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         # Domain Randomization Scale
         self.noise_scale = torch.tensor(
@@ -173,13 +174,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        is_retract = self.retract_error[:, 0] < 5e-2
-        terminated = torch.logical_and(self.is_grasp, is_retract)
+        terminated = self.is_success
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
         done = terminated | truncated
-
-        self.is_success = terminated
 
         # print(f"Reach : {self.is_reach.float()}")
         # print(f"Distance : {self.loc_error}")
@@ -193,8 +191,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_rewards(self):
         # Action Penalty
-        # gripper_norm = torch.abs(self.actions[:, 21])
-        # action_norm = torch.norm(self.actions[:, 7:14], dim=1)
+        kp_norm = torch.norm(self.actions[:, 7:14], dim=1)
 
         # # =========== Approach Reward (1): Potential Based Reward Shaping =============
         # # gamma = 1.0
@@ -229,7 +226,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_retract_rot = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 1] + 1)
 
         r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
-        # r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot) 
+        r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot) 
 
         # print(f"retract loc : {r_retract_loc}")
         # print(f"retract rot : {r_retract_rot}")
@@ -239,11 +236,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
     
 
         # =========== Contact Penalty =================
-        p_contact = torch.logical_and(~self.is_grasp, torch.norm(self._object.data.root_vel_w, dim=1) > 1e-1)
+        # p_contact = torch.logical_and(~self.is_grasp, torch.norm(self._object.data.root_vel_w, dim=1) > 1e-1)
         
         # =========== Summation =============
         reward = torch.where(self.is_grasp,
-                             self.cfg.w_pos_retract * r_retract_loc,
+                             self.cfg.w_loc_retract * r_retract_loc + self.cfg.w_rot_retract * r_retract_rot,
                              self.cfg.w_pos * r_pos)
 
 
@@ -252,7 +249,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #          self.cfg.w_pos_retract * r_retract_loc + \
         #          self.cfg.w_pos_retract * r_retract_rot
 
-        reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_contact * p_contact)
+        reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_penalty * kp_norm)
                  
         return reward
     
@@ -379,10 +376,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
         self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], 
                                                    self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
+        self.is_success[env_ids] = torch.logical_and(self.is_grasp[env_ids],
+                                                     torch.logical_and(self.retract_error[env_ids, 0] < 5e-2, self.retract_error[env_ids, 1] < 5e-2))
             
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:
