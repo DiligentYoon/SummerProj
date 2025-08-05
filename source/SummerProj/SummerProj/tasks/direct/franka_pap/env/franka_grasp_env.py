@@ -208,12 +208,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         gamma = 1.0
         phi_s_prime = -torch.log(self.cfg.alpha * self.loc_error + 1)
         phi_s = -torch.log(self.cfg.alpha * self.prev_loc_error + 1)
-
-        # phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
-        # phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
+        phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
+        phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
 
         r_pos = gamma*phi_s_prime - phi_s 
-        # r_rot = gamma*phi_s_prime_rot - phi_s_rot
+        r_rot = gamma*phi_s_prime_rot - phi_s_rot
 
         # =========== Phase Bonus : Object Grasping ===========
         # 1. Grasp Bonus
@@ -241,7 +240,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # =========== Summation =============
         reward = torch.where(self.is_grasp,
                              self.cfg.w_loc_retract * r_retract_loc + self.cfg.w_rot_retract * r_retract_rot,
-                             self.cfg.w_pos * r_pos)
+                             self.cfg.w_pos * r_pos + self.cfg.w_rot * r_rot)
 
 
         # reward = self.cfg.w_pos * r_pos             + \
@@ -311,15 +310,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ============ Target Point 리셋 ===============
         # object(=target point) reset : Location
         loc_noise_x = sample_uniform(-0.15, 0.15, (len(env_ids), 1), device=self.device)
-        loc_noise_y = sample_uniform(-0.3, 0.3, (len(env_ids), 1), device=self.device)
+        loc_noise_y = sample_uniform(-0.35, 0.35, (len(env_ids), 1), device=self.device)
         loc_noise_z = torch.full((len(env_ids), 1), self.obj_width[0].item()/2, device=self.device)
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         object_default_state = self._object.data.default_root_state[env_ids]
         object_default_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
 
         # object(=target point) reset : Rotation -> Z-axis Randomization
-        rot_noise_z = sample_uniform(-1.0, 1.0, (len(env_ids), ), device=self.device)
-        object_default_state[:, 3:7] = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
+        # rot_noise_z = sample_uniform(-1.0, 1.0, (len(env_ids), ), device=self.device)
+        # object_default_state[:, 3:7] = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
 
         # Pose calculation for root frame variables
         object_default_pos_w = object_default_state[:, :7]
@@ -367,6 +366,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.prev_loc_error[env_ids] = self.loc_error[env_ids]
         self.loc_error[env_ids] = torch.norm(
             self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
+        # Rotation -> Pre-defined angle (TCP 정렬 각)
+        self.prev_rot_error[env_ids] = self.rot_error[env_ids]
+        self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
+                                                       self.object_target_pos_b[env_ids, 3:7])
         # Retract
         self.prev_retract_error[env_ids] = self.retract_error[env_ids]
         self.retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
