@@ -78,3 +78,4 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     w_pos_retract = 50.0
     w_grasp = 1.0
     w_reach = 1.0
+    w_success = 10.0

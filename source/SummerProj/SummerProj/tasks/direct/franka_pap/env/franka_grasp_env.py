@@ -179,6 +179,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         done = terminated | truncated
 
+        self.is_success = terminated
+
         # print(f"Reach : {self.is_reach.float()}")
         # print(f"Distance : {self.loc_error}")
         if torch.any(done):
@@ -231,6 +233,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # print(f"retract loc : {r_retract_loc}")
         # print(f"retract rot : {r_retract_rot}")
+
+        # 3. Success Bonus
+        r_success = self.is_success.float()
     
 
         # =========== Contact Penalty =================
@@ -247,7 +252,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #          self.cfg.w_pos_retract * r_retract_loc + \
         #          self.cfg.w_pos_retract * r_retract_rot
 
-        reward += (self.cfg.w_grasp * r_grasp - self.cfg.w_contact * p_contact)
+        reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_contact * p_contact)
                  
         return reward
     
