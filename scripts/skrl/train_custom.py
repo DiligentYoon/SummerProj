@@ -103,7 +103,6 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import SummerProj.tasks  # noqa: F401
 # from runner import AISLRunner
-from runner_diol import AISLDIOLRunner
 from runner import AISLRunner
 
 

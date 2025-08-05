@@ -208,9 +208,10 @@ def main(env_cfg: dict, agent_cfg: dict):
     # assert "high_level_reward" in extras and "option_terminated" in extras, "HRL signals are missing!"
     print("✅ Single step successful. HRL signals are present in 'extras'.")
 
-    print(f"[Episode Step Test]")
+    print(f"[Episode Training Loops Test]")
     # 전체 학습 루프
     runner.trainer.train()
+    
 
 
     # 시뮬레이터 종료

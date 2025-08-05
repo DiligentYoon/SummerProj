@@ -280,26 +280,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         if len(self.grasp_buffer) > 0:
             self.extras["log"]["grasp_success_rate"] = torch.tensor(sum(self.grasp_buffer) / len(self.grasp_buffer), device=self.device)
 
-        # obs = torch.cat(
-        #     (   
-        #         # robot joint pose (9)
-        #         joint_pos_scaled[:, 0:self.num_active_joints+2],
-        #         # robot joint velocity (9)
-        #         self.robot_joint_vel[:, 0:self.num_active_joints+2],
-        #         # TCP 6D pose w.r.t Root frame (7)
-        #         self.robot_grasp_pos_b,
-        #         # object position w.r.t Root frame (7)
-        #         self.object_pos_b,
-        #         # object position w.r.t TCP frame (7)
-        #         object_pos_tcp,
-        #         # object goal position w.r.t Root Frame (7)
-        #         self.object_target_pos_b,
-        #         # object goal position w.r.t TCP frame (7)
-        #         goal_pos_tcp,
-        #         # Current Phase Info (1)
-        #         self.is_grasp.unsqueeze(-1)
-        #     ), dim=1
-        # )
         obs = torch.cat(
             (   
                 # robot joint pose (9)
@@ -392,7 +372,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                               self.object_target_pos_b[env_ids, 3:7])
         # Phase Signal
         self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
-        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
+        self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], 
+                                                   self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
             
         # ======== Visualization ==========
         # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
