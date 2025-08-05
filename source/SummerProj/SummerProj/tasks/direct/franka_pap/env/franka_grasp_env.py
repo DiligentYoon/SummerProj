@@ -173,7 +173,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        is_retract = torch.logical_and(self.retract_error[:, 0] < 1e-2, self.retract_error[:, 1] < 1e-2)
+        is_retract = self.retract_error[:, 0] < 5e-2
         terminated = torch.logical_and(self.is_grasp, is_retract)
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
