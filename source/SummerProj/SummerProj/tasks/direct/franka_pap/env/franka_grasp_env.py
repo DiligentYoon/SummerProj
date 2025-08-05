@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms, \
                                 combine_frame_transforms, quat_from_angle_axis, quat_mul, quat_inv, sample_uniform, saturate, \
-                                matrix_from_quat, quat_apply
+                                matrix_from_quat, quat_apply, quat_from_matrix
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.assets import RigidObject
 
@@ -327,7 +327,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # Setting Final Goal 3D Location
         self.object_target_pos_w[env_ids, :3] = object_default_pos_w[:, :3] + 0.2 * self.z_unit_tensor[env_ids]
         # Setting Final Goal 3D Rotation -> Standard XYZ axis
-        self.object_target_pos_w[env_ids, 3:7] = self._object.data.default_root_state[env_ids, 3:7]
+        self.object_target_pos_w[env_ids, 3:7] = quat_from_matrix(self.tcp_unit_tensor[env_ids])
 
         self.object_target_pos_b[env_ids, :] = torch.cat(subtract_frame_transforms(
             self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7], 
@@ -369,7 +369,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
         # Retract
         self.prev_retract_error[env_ids] = self.retract_error[env_ids]
-        self.retract_error[env_ids, 0] = torch.norm(self.object_pos_b[env_ids, :3] - \
+        self.retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
                                                     self.object_target_pos_b[env_ids, :3], dim=1)
         self.retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
                                                               self.object_target_pos_b[env_ids, 3:7])
@@ -382,8 +382,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                                        self.retract_error[env_ids, 1] < 1e-1))
             
         # ======== Visualization ==========
-        # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
+        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:

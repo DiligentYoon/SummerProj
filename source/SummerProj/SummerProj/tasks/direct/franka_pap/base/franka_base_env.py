@@ -71,9 +71,12 @@ class FrankaBaseEnv(DirectRLEnv):
         self.tcp_marker = VisualizationMarkers(self.cfg.tcp_cfg)
 
         # unit tensors
-        self.x_unit_tensor = torch.tensor([1, 0, 0], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
-        self.y_unit_tensor = torch.tensor([0, 1, 0], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
-        self.z_unit_tensor = torch.tensor([0, 0, 1], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
+        self.x_unit_tensor = torch.tensor([1, 0, 0], dtype=torch.float32, device=self.device).repeat((self.num_envs, 1))
+        self.y_unit_tensor = torch.tensor([0, 1, 0], dtype=torch.float32, device=self.device).repeat((self.num_envs, 1))
+        self.z_unit_tensor = torch.tensor([0, 0, 1], dtype=torch.float32, device=self.device).repeat((self.num_envs, 1))
+        self.tcp_unit_tensor = torch.tensor([[1, 0, 0],
+                                             [0, -1, 0],
+                                             [0, 0, -1]], dtype=torch.float32, device=self.device).unsqueeze(0).repeat((self.num_envs, 1, 1))
 
     def _setup_scene(self):
         self._robot = Articulation(self.cfg.robot)
