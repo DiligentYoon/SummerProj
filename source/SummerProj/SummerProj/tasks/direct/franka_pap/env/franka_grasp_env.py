@@ -48,10 +48,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.loc_error = torch.zeros(self.num_envs, device=self.device)
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        self.is_grasp = torch.zeros_like(self.is_reach)
-        self.prev_grasp = torch.zeros_like(self.is_reach)
-        self.is_allocated = torch.zeros_like(self.is_reach)
-        self.is_success = torch.zeros_like(self.is_reach)
+        self.is_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.is_allocated = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
 
         # Domain Randomization Scale
         self.noise_scale = torch.tensor(
@@ -219,7 +219,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # =========== Phase Bonus : Object Grasping ===========
         # 1. Grasp Bonus
-        r_grasp = torch.logical_and(self.is_grasp, ~self.prev_grasp)
+        # r_grasp = torch.logical_and(self.is_grasp, ~self.prev_grasp)
+        r_grasp = self.is_grasp.float()
 
         # 2. Retract Error Bonus
         phi_s_prime_retract_loc = -torch.log(self.cfg.alpha * self.retract_error[:, 0] + 1)
@@ -227,10 +228,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_retract_loc = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 0] + 1)
         phi_s_retract_rot = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 1] + 1)
 
-        r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
+        r_retract_loc = torch.max(torch.zeros(1, device=self.device), 
+                                  (gamma * phi_s_prime_retract_loc - phi_s_retract_loc))
         # r_retract_loc = 1-torch.tanh(self.retract_error[:, 0] / 0.02)
         # r_retract_loc = torch.exp(-self.retract_error[:, 0] * 6)
-        r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot)
+        r_retract_rot = torch.max(torch.zeros(1, device=self.device), 
+                                  (gamma * phi_s_prime_retract_rot - phi_s_retract_rot))
         # r_retract_rot = 1-torch.tanh(self.retract_error[:, 1] / 0.2)
         # r_retract_rot = torch.exp(-self.retract_error[:, 1] * 3)
 
@@ -413,7 +416,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
                                                               self.object_target_pos_b[env_ids, 3:7])
             
-            self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach)
+            self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
         else:
             self.prev_loc_error[env_ids] = self.loc_error[env_ids]
             self.prev_rot_error[env_ids] = self.rot_error[env_ids]
