@@ -225,7 +225,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_retract_rot = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 1] + 1)
 
         r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
-        r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot) 
+        # r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot)
+        r_retract_rot = 1-torch.tanh(phi_s_prime_retract_rot / 0.2) 
 
         # print(f"retract loc : {r_retract_loc}")
         # print(f"retract rot : {r_retract_rot}")

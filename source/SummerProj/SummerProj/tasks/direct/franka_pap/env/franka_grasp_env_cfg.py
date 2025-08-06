@@ -72,10 +72,10 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # reward hyperparameter
     alpha, beta = 3.0, 4.0
     w_pos = 10.0
-    w_rot = 0.0
+    w_rot = 5.0
     w_penalty = 0.01
     w_contact = 0.01
-    w_loc_retract = 50.0
+    w_loc_retract = 80.0
     w_rot_retract = 20.0
     w_grasp = 0.5
     w_reach = 1.0
