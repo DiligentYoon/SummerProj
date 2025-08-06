@@ -19,10 +19,10 @@ from ..base.franka_base_env_cfg import FrankaBaseEnvCfg
 @configclass
 class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # env
-    episode_length_s = 5.0
+    episode_length_s = 10.0
     decimation = 5
     action_space = 22
-    observation_space = 40
+    observation_space = 54
     state_space = 0
 
     # simulation

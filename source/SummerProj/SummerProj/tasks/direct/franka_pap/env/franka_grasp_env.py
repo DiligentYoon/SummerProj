@@ -293,19 +293,39 @@ class FrankaGraspEnv(FrankaBaseEnv):
         if len(self.grasp_buffer) > 0:
             self.extras["log"]["grasp_success_rate"] = torch.tensor(sum(self.grasp_buffer) / len(self.grasp_buffer), device=self.device)
 
+        # obs = torch.cat(
+        #     (   
+        #         # robot joint pose (9)
+        #         joint_pos_scaled[:, 0:self.num_active_joints+2],
+        #         # robot joint velocity (9)
+        #         self.robot_joint_vel[:, 0:self.num_active_joints+2],
+        #         # TCP 6D pose w.r.t Root frame (7)
+        #         self.robot_grasp_pos_b,
+        #         # Goal Info w.r.t body frame (7)
+        #         current_goal_info_b,
+        #         # Goal Info w.r.t TCP frame (7)
+        #         current_goal_info_tcp,
+        #         # Current Phase Info (1)
+        #         self.is_grasp.unsqueeze(-1)
+        #     ), dim=1
+        # )
         obs = torch.cat(
-            (   
+            (
                 # robot joint pose (9)
                 joint_pos_scaled[:, 0:self.num_active_joints+2],
                 # robot joint velocity (9)
                 self.robot_joint_vel[:, 0:self.num_active_joints+2],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,
-                # Goal Info w.r.t body frame (7)
-                current_goal_info_b,
-                # Goal Info w.r.t TCP frame (7)
-                current_goal_info_tcp,
-                # Current Phase Info (1)
+                # Object Pose Root Frame (7)
+                self.object_pos_b,
+                # Object Pose TCP Frame (7)
+                object_pos_tcp,
+                # Goal Pose Root Frame (7)
+                self.object_target_pos_b,
+                # Goal Pose TCP Frame (7)
+                goal_pos_tcp,
+                # Phase Info (1)
                 self.is_grasp.unsqueeze(-1)
             ), dim=1
         )
@@ -346,7 +366,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         ), dim=1)
 
         # First grasping signal
-        self.is_first_grasp[env_ids] = torch.zeros((env_ids, 1), dtype=torch.bool, device=self.device)
+        # self.is_first_grasp[env_ids] = torch.zeros((env_ids, 1), dtype=torch.bool, device=self.device)
         
         self._object.write_root_pose_to_sim(object_default_state[:, :7], env_ids)
         self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)
@@ -400,7 +420,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                    self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
         
 
-        self.is_first_grasp[env_ids] = torch.logical_and(self.is_grasp[env_ids], ~self.is_first_grasp[env_ids])
+        # self.is_first_grasp[env_ids] = torch.logical_and(self.is_grasp[env_ids], ~self.is_first_grasp[env_ids])
 
         self.is_success[env_ids] = torch.logical_and(self.is_grasp[env_ids], 
                                                      torch.logical_and(self.retract_error[env_ids, 0] < 5e-2,
