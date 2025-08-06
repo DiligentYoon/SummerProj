@@ -49,6 +49,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_grasp = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.is_first_grasp = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.is_allocated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         # Domain Randomization Scale
@@ -224,12 +226,17 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_retract_loc = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 0] + 1)
         phi_s_retract_rot = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 1] + 1)
 
-        r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
+        # r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)
+        r_retract_loc = 1-torch.tanh(self.retract_error[:, 0] / 0.02)
+        # r_retract_loc = torch.exp(-self.retract_error[:, 0] * 2)
         # r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot)
-        r_retract_rot = 1-torch.tanh(phi_s_prime_retract_rot / 0.2) 
+        r_retract_rot = 1-torch.tanh(self.retract_error[:, 1] / 0.2)
 
-        # print(f"retract loc : {r_retract_loc}")
+        # print(f"=" * 30)
+        # print(f"retract loc reward : {r_retract_loc}")
         # print(f"retract rot : {r_retract_rot}")
+        # print(f"retract loc error : {self.retract_error[:, 0]}")
+        # print(f"=" * 30)
 
         # 3. Success Bonus
         r_success = self.is_success.float()
@@ -251,6 +258,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_penalty * kp_norm)
                  
+        # print(f"retract_loc rew : {r_retract_loc}")
+        # print(f"retract_rot_rew : {r_retract_rot}")
+
+
         return reward
     
     def _get_observations(self):
@@ -292,7 +303,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 self.robot_grasp_pos_b,
                 # Goal Info w.r.t body frame (7)
                 current_goal_info_b,
-                # Goal Info w.r.t root frame (7)
+                # Goal Info w.r.t TCP frame (7)
                 current_goal_info_tcp,
                 # Current Phase Info (1)
                 self.is_grasp.unsqueeze(-1)
@@ -333,6 +344,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7], 
             self.object_target_pos_w[env_ids, :3], self.object_target_pos_w[env_ids, 3:7]
         ), dim=1)
+
+        # First grasping signal
+        self.is_first_grasp[env_ids] = torch.zeros((env_ids, 1), dtype=torch.bool, device=self.device)
         
         self._object.write_root_pose_to_sim(object_default_state[:, :7], env_ids)
         self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)
@@ -378,16 +392,23 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
                                                               self.object_target_pos_b[env_ids, 3:7])
         # Phase Signal
-        self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
+        if self.cfg.w_rot > 0.0:
+            self.is_reach[env_ids] = torch.logical_and(self.loc_error[env_ids] < 5e-2, self.rot_error[env_ids] < 1e-1)
+        else:
+            self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
         self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], 
                                                    self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
+        
+
+        self.is_first_grasp[env_ids] = torch.logical_and(self.is_grasp[env_ids], ~self.is_first_grasp[env_ids])
+
         self.is_success[env_ids] = torch.logical_and(self.is_grasp[env_ids], 
                                                      torch.logical_and(self.retract_error[env_ids, 0] < 5e-2,
                                                                        self.retract_error[env_ids, 1] < 1e-1))
             
         # ======== Visualization ==========
-        self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
+        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:
