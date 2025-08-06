@@ -49,7 +49,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_grasp = torch.zeros_like(self.is_reach)
-        self.previously_grasp = torch.zeros_like(self.is_reach)
+        self.prev_grasp = torch.zeros_like(self.is_reach)
         self.is_allocated = torch.zeros_like(self.is_reach)
         self.is_success = torch.zeros_like(self.is_reach)
 
@@ -176,7 +176,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        drop = torch.logical_and(self.previously_grasp, ~self.is_grasp)
+        drop = torch.logical_and(self.prev_grasp, ~self.is_grasp)
         terminated = self.is_success | drop
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
@@ -219,7 +219,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # =========== Phase Bonus : Object Grasping ===========
         # 1. Grasp Bonus
-        r_grasp = torch.logical_and(self.is_grasp, ~self.previously_grasp)
+        r_grasp = torch.logical_and(self.is_grasp, ~self.prev_grasp)
 
         # 2. Retract Error Bonus
         phi_s_prime_retract_loc = -torch.log(self.cfg.alpha * self.retract_error[:, 0] + 1)
@@ -374,7 +374,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)
 
         # Need to refresh the intermediate values so that _get_observations() can use the latest values
-        self._compute_intermediate_values(env_ids)
+        self._compute_intermediate_values(env_ids, reset=True)
 
     
     def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None, reset: bool = False):
@@ -398,17 +398,37 @@ class FrankaGraspEnv(FrankaBaseEnv):
             root_pos_w[:, :3], root_pos_w[:, 3:7], self.object_pos_w[env_ids, :3], self.object_pos_w[env_ids, 3:7]
         ), dim=1)
         
+
+        # ========= Previous Variables 업데이트 =========
+        if reset:
+            self.prev_loc_error[env_ids] = torch.norm(
+                self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
+
+            self.prev_rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
+                                                                self.object_target_pos_b[env_ids, 3:7])
+            
+            self.prev_retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
+                                                    self.object_target_pos_b[env_ids, :3], dim=1)
+            
+            self.prev_retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
+                                                              self.object_target_pos_b[env_ids, 3:7])
+            
+            self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach)
+        else:
+            self.prev_loc_error[env_ids] = self.loc_error[env_ids]
+            self.prev_rot_error[env_ids] = self.rot_error[env_ids]
+            self.prev_retract_error[env_ids] = self.retract_error[env_ids]    
+            self.prev_grasp[env_ids] = self.is_grasp.clone() 
+
+
         # ========= Position Error 업데이트 =========
         # Location
-        self.prev_loc_error[env_ids] = self.loc_error[env_ids]
         self.loc_error[env_ids] = torch.norm(
             self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
         # Rotation -> Pre-defined angle (TCP 정렬 각)
-        self.prev_rot_error[env_ids] = self.rot_error[env_ids]
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
                                                        self.object_target_pos_b[env_ids, 3:7])
         # Retract
-        self.prev_retract_error[env_ids] = self.retract_error[env_ids]
         self.retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
                                                     self.object_target_pos_b[env_ids, :3], dim=1)
         self.retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
@@ -419,7 +439,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         else:
             self.is_reach[env_ids] = self.loc_error[env_ids] < 5e-2
 
-        self.previously_grasp[env_ids] = self.is_grasp.clone()
         self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], 
                                                    self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
 
