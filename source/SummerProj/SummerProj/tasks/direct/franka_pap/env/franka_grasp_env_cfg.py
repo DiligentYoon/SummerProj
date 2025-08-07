@@ -67,12 +67,23 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
             )
         }
     )
+
+    # object marker
+    object_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+        prim_path="Visuals/object_marker",
+        markers={
+        "frame": sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/frame_prim.usd",
+            scale=(0.1, 0.1, 0.1),
+            )
+        }
+    )
     
 
     # reward hyperparameter
     alpha, beta = 3.0, 4.0
-    w_pos = 15.0
-    w_rot = 10.0
+    w_pos = 10.0
+    w_rot = 15.0
     w_penalty = 0.001
     w_contact = 0.01
     w_loc_retract = 60.0

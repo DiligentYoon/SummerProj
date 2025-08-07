@@ -69,6 +69,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # Goal point & Via point marker
         self.target_marker = VisualizationMarkers(self.cfg.goal_pos_marker_cfg)
+        self.object_marker = VisualizationMarkers(self.cfg.object_pos_marker_cfg)
 
 
     def _setup_scene(self):
@@ -238,9 +239,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # r_retract_rot = torch.exp(-self.retract_error[:, 1] * 3)
 
         # print(f"=" * 30)
-        # print(f"retract loc reward : {r_retract_loc}")
-        # print(f"retract rot : {r_retract_rot}")
+        # # print(f"retract loc reward : {r_retract_loc}")
+        # # print(f"retract rot : {r_retract_rot}")
         # print(f"retract loc error : {self.retract_error[:, 0]}")
+        # print(f"retract rot error : {self.retract_error[:, 1]}")
         # print(f"=" * 30)
 
         # 3. Success Bonus
@@ -353,14 +355,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
         object_default_state = self._object.data.default_root_state[env_ids]
         object_default_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
 
-        # # Object(=target point) reset : Rotation
-        # # 1. Alignment with TCP Axis
-        # tcp_quat = quat_from_matrix(self.tcp_unit_tensor[env_ids])
-        # # 2. Z-axis Randomization
-        # rot_noise_z = sample_uniform(-1.0, 1.0, (len(env_ids), ), device=self.device)
-        # rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
-        # # 3. Apply Quaternion
-        # object_default_state[:, 3:7] = quat_mul(tcp_quat, rot_noise)
+        # Object(=target point) reset : Rotation
+        # 1. Alignment with TCP Axis
+        tcp_quat = quat_from_matrix(self.tcp_unit_tensor[env_ids])
+        # 2. Z-axis Randomization
+        rot_noise_z = sample_uniform(-0.5, 0.5, (len(env_ids), ), device=self.device)
+        rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
+        # 3. Apply Quaternion
+        object_default_state[:, 3:7] = quat_mul(tcp_quat, rot_noise)
 
         # Pose calculation for root frame variables
         object_default_pos_w = object_default_state[:, :7]
@@ -368,8 +370,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # Setting Final Goal 3D Location
         self.object_target_pos_w[env_ids, :3] = object_default_pos_w[:, :3] + 0.2 * self.z_unit_tensor[env_ids]
         # Setting Final Goal 3D Rotation -> Standard XYZ axis
-        self.object_target_pos_w[env_ids, 3:7] = quat_from_matrix(self.tcp_unit_tensor[env_ids])
-
+        self.object_target_pos_w[env_ids, 3:7] = object_default_state[:, 3:7]
         self.object_target_pos_b[env_ids, :] = torch.cat(subtract_frame_transforms(
             self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7], 
             self.object_target_pos_w[env_ids, :3], self.object_target_pos_w[env_ids, 3:7]
@@ -454,12 +455,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                      torch.logical_and(self.retract_error[env_ids, 0] < 5e-2,
                                                                        self.retract_error[env_ids, 1] < 1e-1))
         
-        print(f"\n")
-        print(f"Reach/Grasp : {torch.sum(self.is_reach.float()).item()} / {torch.sum(self.is_grasp.float()).item()}")
+        # print(f"\n")
+        # print(f"Reach/Grasp : {torch.sum(self.is_reach.float()).item()} / {torch.sum(self.is_grasp.float()).item()}")
             
         # ======== Visualization ==========
-        self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
+        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        # self.object_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:
