@@ -261,7 +261,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #          self.cfg.w_pos_retract * r_retract_loc + \
         #          self.cfg.w_pos_retract * r_retract_rot
 
-        reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_penalty * kp_norm)
+        reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_penalty * kp_norm - 1.0)
                  
         # print(f"retract_loc rew : {r_retract_loc}")
         # print(f"retract_rot_rew : {r_retract_rot}")
@@ -448,6 +448,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_success[env_ids] = torch.logical_and(self.is_grasp[env_ids], 
                                                      torch.logical_and(self.retract_error[env_ids, 0] < 5e-2,
                                                                        self.retract_error[env_ids, 1] < 1e-1))
+        
+        print(f"\n")
+        print(f"Reach/Grasp : {torch.sum(self.is_reach.float()).item()} / {torch.sum(self.is_grasp.float()).item()}")
             
         # ======== Visualization ==========
         self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
