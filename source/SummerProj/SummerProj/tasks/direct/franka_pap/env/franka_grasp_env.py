@@ -353,9 +353,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
         object_default_state = self._object.data.default_root_state[env_ids]
         object_default_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
 
-        # object(=target point) reset : Rotation -> Z-axis Randomization
+        # # Object(=target point) reset : Rotation
+        # # 1. Alignment with TCP Axis
+        # tcp_quat = quat_from_matrix(self.tcp_unit_tensor[env_ids])
+        # # 2. Z-axis Randomization
         # rot_noise_z = sample_uniform(-1.0, 1.0, (len(env_ids), ), device=self.device)
-        # object_default_state[:, 3:7] = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
+        # rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
+        # # 3. Apply Quaternion
+        # object_default_state[:, 3:7] = quat_mul(tcp_quat, rot_noise)
 
         # Pose calculation for root frame variables
         object_default_pos_w = object_default_state[:, :7]
