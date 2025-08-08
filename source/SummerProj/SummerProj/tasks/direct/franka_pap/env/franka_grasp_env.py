@@ -188,8 +188,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         done = terminated | truncated
 
-        # print(f"Reach : {self.is_reach.float()}")
-        # print(f"Distance : {self.loc_error}")
         if torch.any(done):
             done_env_ids = torch.where(done)[0]
             for env_id in done_env_ids:
@@ -236,17 +234,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         r_retract_loc = torch.max(torch.zeros(1, device=self.device), 
                                   (gamma * phi_s_prime_retract_loc - phi_s_retract_loc))
-        # r_retract_loc = 1-torch.tanh(self.retract_error[:, 0] / 0.02)
-        # r_retract_loc = torch.exp(-self.retract_error[:, 0] * 6)
         r_retract_rot = torch.max(torch.zeros(1, device=self.device), 
                                   (gamma * phi_s_prime_retract_rot - phi_s_retract_rot))
-        # r_retract_rot = 1-torch.tanh(self.retract_error[:, 1] / 0.2)
-        # r_retract_rot = torch.exp(-self.retract_error[:, 1] * 3)
-
-        # print(f"=" * 30)
-        # print(f"loc error : {self.loc_error}")
-        # print(f"rot error : {self.rot_error}")
-        # print(f"=" * 30)
 
         # 3. Success Bonus
         r_success = self.is_success.float()
@@ -260,16 +249,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                              self.cfg.w_loc_retract * r_retract_loc + self.cfg.w_rot_retract * r_retract_rot,
                              self.cfg.w_pos * r_pos + self.cfg.w_rot * r_rot)
 
-
-        # reward = self.cfg.w_pos * r_pos             + \
-        #          self.cfg.w_grasp * r_grasp         + \
-        #          self.cfg.w_pos_retract * r_retract_loc + \
-        #          self.cfg.w_pos_retract * r_retract_rot
-
-        reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_penalty * kp_norm - 1.0)
+        reward += (self.cfg.w_grasp * r_grasp + self.cfg.w_success * r_success - self.cfg.w_penalty * kp_norm - self.cfg.w_ps)
                  
-        # print(f"retract_loc rew : {r_retract_loc}")
-        # print(f"retract_rot_rew : {r_retract_rot}")
 
         self.extras["log"]["Approach_loc"] = torch.mean(r_pos)
         self.extras["log"]["Approach_rot"] = torch.mean(r_rot)
@@ -376,7 +357,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # 1. Alignment with TCP Axis
         tcp_quat = quat_from_matrix(self.tcp_unit_tensor[env_ids])
         # 2. Z-axis Randomization
-        rot_noise_z = sample_uniform(-0.5, 0.5, (len(env_ids), ), device=self.device)
+        rot_noise_z = sample_uniform(-0.8, 0.8, (len(env_ids), ), device=self.device)
         rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
         # 3. Apply Quaternion
         object_default_state[:, 3:7] = quat_mul(tcp_quat, rot_noise)
@@ -400,9 +381,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.object_target_pos_w[env_ids, :3], self.object_target_pos_w[env_ids, 3:7]
         ), dim=1)
 
-        # First grasping signal
-        # self.is_first_grasp[env_ids] = torch.zeros((env_ids, 1), dtype=torch.bool, device=self.device)
-        
         self._object.write_root_pose_to_sim(object_default_state[:, :7], env_ids)
         self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)
 
@@ -459,7 +437,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # self.loc_error[env_ids] = torch.norm(
         #     self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
         loc_error_xyz = torch.abs(self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3])
-        self.loc_error[env_ids] = torch.sqrt(4 * torch.square(loc_error_xyz[:, 0]) + 4 * torch.square(loc_error_xyz[:, 1]) + torch.square(loc_error_xyz[:, 2])).squeeze(-1)
+        self.loc_error[env_ids] = torch.sqrt(self.cfg.wx * torch.square(loc_error_xyz[:, 0]) +
+                                             self.cfg.wy * torch.square(loc_error_xyz[:, 1]) + 
+                                             self.cfg.wz * torch.square(loc_error_xyz[:, 2])).squeeze(-1)
         # Rotation -> Pre-defined angle (TCP 정렬 각)
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
                                                        self.object_target_pos_b[env_ids, 3:7])
@@ -491,9 +471,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             
         # ======== Visualization ==========
-        self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
-        self.object_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
+        # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
+        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        # self.object_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:
