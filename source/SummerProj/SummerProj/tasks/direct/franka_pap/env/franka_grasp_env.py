@@ -35,6 +35,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # Goal Pose
         self.object_target_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_target_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
+        self.sub_goal_w = torch.zeros((self.num_envs, 7), device=self.device)
+        self.sub_goal_b = torch.zeros((self.num_envs, 7), device=self.device)
 
         # Robot and Object Grasp Poses
         self.robot_grasp_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
@@ -287,19 +289,19 @@ class FrankaGraspEnv(FrankaBaseEnv):
             - 1.0
         )
 
-        object_loc_tcp, object_rot_tcp = subtract_frame_transforms(
-            self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
-        object_pos_tcp = torch.cat([object_loc_tcp, object_rot_tcp], dim=1)
+        sub_goal_loc_tcp, sub_goal_rot_tcp = subtract_frame_transforms(
+            self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.sub_goal_w[:, :3], self.sub_goal_w[:, 3:7])
+        sub_goal_pos_tcp = torch.cat([sub_goal_loc_tcp, sub_goal_rot_tcp], dim=1)
 
         goal_pos_tcp = torch.cat(subtract_frame_transforms(
             self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7]), dim=1)
 
         current_goal_info_b = torch.where(self.is_grasp.unsqueeze(-1),
                                           self.object_target_pos_b,
-                                          self.object_pos_b)
+                                          self.sub_goal_b)
         current_goal_info_tcp = torch.where(self.is_grasp.unsqueeze(-1),
                                             goal_pos_tcp,
-                                            object_pos_tcp)
+                                            sub_goal_pos_tcp)
         
         current_goal_dist_loc = torch.where(self.is_grasp,
                                             self.retract_error[:, 0],
@@ -315,46 +317,43 @@ class FrankaGraspEnv(FrankaBaseEnv):
         if len(self.grasp_buffer) > 0:
             self.extras["log"]["grasp_success_rate"] = torch.tensor(sum(self.grasp_buffer) / len(self.grasp_buffer), device=self.device)
 
-        # obs = torch.cat(
-        #     (   
-        #         # robot joint pose (9)
-        #         joint_pos_scaled[:, 0:self.num_active_joints+2],
-        #         # robot joint velocity (9)
-        #         self.robot_joint_vel[:, 0:self.num_active_joints+2],
-        #         # TCP 6D pose w.r.t Root frame (7)
-        #         self.robot_grasp_pos_b,
-        #         # Goal Info w.r.t body frame (7)
-        #         current_goal_info_b,
-        #         # Goal Info w.r.t TCP frame (7)
-        #         current_goal_info_tcp,
-        #         # # loc dist (1)
-        #         # current_goal_dist_loc,
-        #         # # rot dist (1)
-        #         # current_goal_dist_rot,
-        #         # Current Phase Info (1)
-        #         self.is_grasp.unsqueeze(-1)
-        #     ), dim=1
-        # )
         obs = torch.cat(
-            (
+            (   
                 # robot joint pose (9)
                 joint_pos_scaled[:, 0:self.num_active_joints+2],
                 # robot joint velocity (9)
                 self.robot_joint_vel[:, 0:self.num_active_joints+2],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,
-                # Object Pose Root Frame (7)
-                self.object_pos_b,
-                # Object Pose TCP Frame (7)
-                object_pos_tcp,
-                # Goal Pose Root Frame (7)
-                self.object_target_pos_b,
-                # Goal Pose TCP Frame (7)
-                goal_pos_tcp,
-                # Phase Info (1)
+                # Goal Info w.r.t body frame (7)
+                current_goal_info_b,
+                # Goal Info w.r.t TCP frame (7)
+                current_goal_info_tcp,
+                # Current Phase Info (1)
                 self.is_grasp.unsqueeze(-1)
             ), dim=1
         )
+        
+        # obs = torch.cat(
+        #     (
+        #         # robot joint pose (9)
+        #         joint_pos_scaled[:, 0:self.num_active_joints+2],
+        #         # robot joint velocity (9)
+        #         self.robot_joint_vel[:, 0:self.num_active_joints+2],
+        #         # TCP 6D pose w.r.t Root frame (7)
+        #         self.robot_grasp_pos_b,
+        #         # Object Pose Root Frame (7)
+        #         self.object_pos_b,
+        #         # Object Pose TCP Frame (7)
+        #         object_pos_tcp,
+        #         # Goal Pose Root Frame (7)
+        #         self.object_target_pos_b,
+        #         # Goal Pose TCP Frame (7)
+        #         goal_pos_tcp,
+        #         # Phase Info (1)
+        #         self.is_grasp.unsqueeze(-1)
+        #     ), dim=1
+        # )
 
         return {"policy": obs}
 
@@ -385,6 +384,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # Pose calculation for root frame variables
         object_default_pos_w = object_default_state[:, :7]
+
+        # Setting Sub-goal
+        self.sub_goal_w[env_ids] = object_default_pos_w[:, :7]
+        self.sub_goal_b[env_ids] = torch.cat(subtract_frame_transforms(
+            self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7],
+            object_default_pos_w[:, :3], object_default_pos_w[:, 3:7]
+        ), dim=1)
 
         # Setting Final Goal 3D Location
         self.object_target_pos_w[env_ids, :3] = object_default_pos_w[:, :3] + 0.2 * self.z_unit_tensor[env_ids]
