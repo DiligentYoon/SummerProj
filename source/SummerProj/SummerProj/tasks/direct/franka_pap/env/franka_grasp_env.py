@@ -49,6 +49,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.retract_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.loc_error = torch.zeros(self.num_envs, device=self.device)
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
+        self.weighted_loc_error = torch.zeros(self.num_envs, device=self.device)
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
@@ -455,8 +456,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ========= Position Error 업데이트 =========
         # Location
-        self.loc_error[env_ids] = torch.norm(
-            self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
+        # self.loc_error[env_ids] = torch.norm(
+        #     self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
+        loc_error_xyz = torch.abs(self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3])
+        self.loc_error[env_ids] = torch.sqrt(4 * torch.square(loc_error_xyz[:, 0]) + 4 * torch.square(loc_error_xyz[:, 1]) + torch.square(loc_error_xyz[:, 2])).squeeze(-1)
         # Rotation -> Pre-defined angle (TCP 정렬 각)
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
                                                        self.object_target_pos_b[env_ids, 3:7])
@@ -483,10 +486,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                                            self.loc_error[env_ids] < 5e-2 * 4),
                                                                            torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 1e-1)
             print(f"\n")
-            print(f"Reach/Contact/Grasp/Success : {torch.sum(self.is_reach.float()).item()} / \
-                                                  {torch.sum(self.is_contact.float()).item()}) \
-                                                  {torch.sum(self.is_grasp.float()).item()} / \
-                                                  {torch.sum(self.is_success.float()).item()}")
+            print(f"Reach/Contact/Grasp/Success : {torch.sum(self.is_reach.float()).item()} / {torch.sum(self.is_contact.float()).item()} / {torch.sum(self.is_grasp.float()).item()} / {torch.sum(self.is_success.float()).item()}")
         else:
             self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             
