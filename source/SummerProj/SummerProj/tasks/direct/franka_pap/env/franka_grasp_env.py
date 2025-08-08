@@ -492,7 +492,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             
         # ======== Visualization ==========
         self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.sub_goal_w[:, :3], self.sub_goal_w[:, 3:7])
+        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
         self.object_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
     
 
