@@ -182,7 +182,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
     def _get_dones(self):
         self._compute_intermediate_values()
         drop = torch.logical_and(self.prev_grasp, ~self.is_grasp) | torch.logical_and(self.object_pos_w[:, 2] < 0, ~self.is_grasp)
-        terminated = self.is_success | drop
+        terminated = self.is_success | drop | self.is_contact
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
         done = terminated | truncated
@@ -243,10 +243,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # r_retract_rot = torch.exp(-self.retract_error[:, 1] * 3)
 
         # print(f"=" * 30)
-        # # print(f"retract loc reward : {r_retract_loc}")
-        # # print(f"retract rot : {r_retract_rot}")
-        # print(f"retract loc error : {self.retract_error[:, 0]}")
-        # print(f"retract rot error : {self.retract_error[:, 1]}")
+        # print(f"loc error : {self.loc_error}")
+        # print(f"rot error : {self.rot_error}")
         # print(f"=" * 30)
 
         # 3. Success Bonus
@@ -481,15 +479,20 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                                        self.retract_error[env_ids, 1] < 1e-1))
         
         if not reset:
-            # self.is_contact[env_ids] = torch.logical_and(~self.is_reach[env_ids], torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 5e-1)
+            self.is_contact[env_ids] = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
+                                                                           self.loc_error[env_ids] < 5e-2 * 4),
+                                                                           torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 1e-1)
             print(f"\n")
-            print(f"Reach/Grasp/Success : {torch.sum(self.is_reach.float()).item()} / {torch.sum(self.is_grasp.float()).item()} / {torch.sum(self.is_success.float()).item()}")
-        # else:
-        #     self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            print(f"Reach/Contact/Grasp/Success : {torch.sum(self.is_reach.float()).item()} / \
+                                                  {torch.sum(self.is_contact.float()).item()}) \
+                                                  {torch.sum(self.is_grasp.float()).item()} / \
+                                                  {torch.sum(self.is_success.float()).item()}")
+        else:
+            self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             
         # ======== Visualization ==========
         self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        self.target_marker.visualize(self.sub_goal_w[:, :3], self.sub_goal_w[:, 3:7])
         self.object_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
     
 
