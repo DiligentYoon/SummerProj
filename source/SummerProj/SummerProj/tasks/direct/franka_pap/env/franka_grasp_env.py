@@ -179,7 +179,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        drop = torch.logical_and(self.prev_grasp, ~self.is_grasp) | (self.object_pos_w[:, 2] < 0)
+        drop = torch.logical_and(self.prev_grasp, ~self.is_grasp) | torch.logical_and(self.object_pos_w[:, 2] < 0, ~self.is_grasp)
         terminated = self.is_success | drop
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
