@@ -50,9 +50,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-        self.is_allocated = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-        self.is_allocated = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         
 
@@ -181,7 +179,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
     def _get_dones(self):
         self._compute_intermediate_values()
-        drop = torch.logical_and(self.prev_grasp, ~self.is_grasp)
+        drop = torch.logical_and(self.prev_grasp, ~self.is_grasp) | (self.object_pos_w[:, 2] < 0)
         terminated = self.is_success | drop
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
@@ -214,8 +212,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # =========== Approach Reward (1-1): Potential Based Reward Shaping by log scale =============
         gamma = 1.0
-        phi_s_prime = -torch.log(self.cfg.alpha * self.loc_error + 1)
-        phi_s = -torch.log(self.cfg.alpha * self.prev_loc_error + 1)
+        phi_s_prime = -torch.log(self.cfg.beta * self.loc_error + 1)
+        phi_s = -torch.log(self.cfg.beta * self.prev_loc_error + 1)
         phi_s_prime_rot = -torch.log(self.cfg.alpha * self.rot_error + 1)
         phi_s_rot = -torch.log(self.cfg.alpha * self.prev_rot_error + 1)
 
@@ -272,6 +270,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # print(f"retract_loc rew : {r_retract_loc}")
         # print(f"retract_rot_rew : {r_retract_rot}")
 
+        self.extras["log"]["Approach_loc"] = torch.mean(r_pos)
+        self.extras["log"]["Approach_rot"] = torch.mean(r_rot)
+        self.extras["log"]["Retract_loc"] = torch.mean(r_retract_loc)
+        self.extras["log"]["Retract_rot"] = torch.mean(r_retract_rot)
+
 
         return reward
     
@@ -312,46 +315,46 @@ class FrankaGraspEnv(FrankaBaseEnv):
         if len(self.grasp_buffer) > 0:
             self.extras["log"]["grasp_success_rate"] = torch.tensor(sum(self.grasp_buffer) / len(self.grasp_buffer), device=self.device)
 
-        obs = torch.cat(
-            (   
-                # robot joint pose (9)
-                joint_pos_scaled[:, 0:self.num_active_joints+2],
-                # robot joint velocity (9)
-                self.robot_joint_vel[:, 0:self.num_active_joints+2],
-                # TCP 6D pose w.r.t Root frame (7)
-                self.robot_grasp_pos_b,
-                # Goal Info w.r.t body frame (7)
-                current_goal_info_b,
-                # Goal Info w.r.t TCP frame (7)
-                current_goal_info_tcp,
-                # loc dist (1)
-                current_goal_dist_loc,
-                # rot dist (1)
-                current_goal_dist_rot,
-                # Current Phase Info (1)
-                self.is_grasp.unsqueeze(-1)
-            ), dim=1
-        )
         # obs = torch.cat(
-        #     (
+        #     (   
         #         # robot joint pose (9)
         #         joint_pos_scaled[:, 0:self.num_active_joints+2],
         #         # robot joint velocity (9)
         #         self.robot_joint_vel[:, 0:self.num_active_joints+2],
         #         # TCP 6D pose w.r.t Root frame (7)
         #         self.robot_grasp_pos_b,
-        #         # Object Pose Root Frame (7)
-        #         self.object_pos_b,
-        #         # Object Pose TCP Frame (7)
-        #         object_pos_tcp,
-        #         # Goal Pose Root Frame (7)
-        #         self.object_target_pos_b,
-        #         # Goal Pose TCP Frame (7)
-        #         goal_pos_tcp,
-        #         # Phase Info (1)
+        #         # Goal Info w.r.t body frame (7)
+        #         current_goal_info_b,
+        #         # Goal Info w.r.t TCP frame (7)
+        #         current_goal_info_tcp,
+        #         # # loc dist (1)
+        #         # current_goal_dist_loc,
+        #         # # rot dist (1)
+        #         # current_goal_dist_rot,
+        #         # Current Phase Info (1)
         #         self.is_grasp.unsqueeze(-1)
         #     ), dim=1
         # )
+        obs = torch.cat(
+            (
+                # robot joint pose (9)
+                joint_pos_scaled[:, 0:self.num_active_joints+2],
+                # robot joint velocity (9)
+                self.robot_joint_vel[:, 0:self.num_active_joints+2],
+                # TCP 6D pose w.r.t Root frame (7)
+                self.robot_grasp_pos_b,
+                # Object Pose Root Frame (7)
+                self.object_pos_b,
+                # Object Pose TCP Frame (7)
+                object_pos_tcp,
+                # Goal Pose Root Frame (7)
+                self.object_target_pos_b,
+                # Goal Pose TCP Frame (7)
+                goal_pos_tcp,
+                # Phase Info (1)
+                self.is_grasp.unsqueeze(-1)
+            ), dim=1
+        )
 
         return {"policy": obs}
 
@@ -365,7 +368,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ============ Target Point 리셋 ===============
         # object(=target point) reset : Location
         loc_noise_x = sample_uniform(-0.15, 0.15, (len(env_ids), 1), device=self.device)
-        loc_noise_y = sample_uniform(-0.35, 0.35, (len(env_ids), 1), device=self.device)
+        loc_noise_y = sample_uniform(-0.3, 0.3, (len(env_ids), 1), device=self.device)
         loc_noise_z = torch.full((len(env_ids), 1), self.obj_width[0].item()/2, device=self.device)
         loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         object_default_state = self._object.data.default_root_state[env_ids]
@@ -452,7 +455,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
         # Rotation -> Pre-defined angle (TCP 정렬 각)
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
-                                                       self.object_pos_b[env_ids, 3:7])
+                                                       self.object_target_pos_b[env_ids, 3:7])
         # Retract
         self.retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
                                                     self.object_target_pos_b[env_ids, :3], dim=1)
@@ -467,12 +470,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], 
                                                    self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
 
-
         self.is_success[env_ids] = torch.logical_and(self.is_grasp[env_ids], 
                                                      torch.logical_and(self.retract_error[env_ids, 0] < 5e-2,
                                                                        self.retract_error[env_ids, 1] < 1e-1))
         
-        if not reset and self.is_grasp[env_ids].any():
+        if not reset:
             # self.is_contact[env_ids] = torch.logical_and(~self.is_reach[env_ids], torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 5e-1)
             print(f"\n")
             print(f"Reach/Grasp/Success : {torch.sum(self.is_reach.float()).item()} / {torch.sum(self.is_grasp.float()).item()} / {torch.sum(self.is_success.float()).item()}")
@@ -480,9 +482,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #     self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             
         # ======== Visualization ==========
-        # self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
-        # self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
-        # self.object_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
+        self.tcp_marker.visualize(self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7])
+        self.target_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        self.object_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
     
 
     def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:
