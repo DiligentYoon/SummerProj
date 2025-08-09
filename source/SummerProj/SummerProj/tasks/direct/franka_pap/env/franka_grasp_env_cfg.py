@@ -91,7 +91,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     w_grasp = 1.5
     w_reach = 1.0
     w_success = 300.0
-    wx = 4
-    wy = 4
-    wz = 1
-    w_ps = 1
+    wx = 4.0
+    wy = 4.0
+    wz = 1.0
+    w_ps = 1.0

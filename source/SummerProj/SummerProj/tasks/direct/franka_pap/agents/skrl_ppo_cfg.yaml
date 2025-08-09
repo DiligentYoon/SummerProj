@@ -43,7 +43,7 @@ agent:
   # learning rate: 1.0e-04
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
-    kl_threshold: 0.008
+    kl_threshold: 0.004
     # kl_threshold: 0.004
   state_preprocessor: RunningStandardScaler
   state_preprocessor_kwargs: null
@@ -73,5 +73,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 64000
+  timesteps: 32000
   environment_info: log
