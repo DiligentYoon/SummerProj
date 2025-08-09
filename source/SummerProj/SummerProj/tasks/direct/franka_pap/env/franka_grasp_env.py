@@ -357,7 +357,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # 1. Alignment with TCP Axis
         tcp_quat = quat_from_matrix(self.tcp_unit_tensor[env_ids])
         # 2. Z-axis Randomization
-        rot_noise_z = sample_uniform(-0.5, 0.5, (len(env_ids), ), device=self.device)
+        rot_noise_z = sample_uniform(-0.8, 0.8, (len(env_ids), ), device=self.device)
         rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
         # 3. Apply Quaternion
         object_default_state[:, 3:7] = quat_mul(tcp_quat, rot_noise)
