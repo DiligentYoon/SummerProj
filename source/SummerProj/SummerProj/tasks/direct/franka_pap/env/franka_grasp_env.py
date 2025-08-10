@@ -33,6 +33,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.imp_commands = torch.zeros((self.num_envs, self.imp_controller.num_actions), device=self.device)
 
         # Goal Pose
+        self.object_place_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
+        self.object_place_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_target_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_target_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
         self.sub_goal_w = torch.zeros((self.num_envs, 7), device=self.device)
@@ -43,13 +45,16 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.robot_grasp_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
 
         # Object Move Checker & Success Checker
+        self.prev_place_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.prev_retract_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.prev_loc_error = torch.zeros(self.num_envs, device=self.device)
         self.prev_rot_error = torch.zeros(self.num_envs, device=self.device)
+
+        self.place_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.retract_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.loc_error = torch.zeros(self.num_envs, device=self.device)
         self.rot_error = torch.zeros(self.num_envs, device=self.device)
-        self.weighted_loc_error = torch.zeros(self.num_envs, device=self.device)
+
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
@@ -340,15 +345,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
             env_ids = self._robot._ALL_INDICES
         # ============ Robot State & Scene 리셋 ===============
         super()._reset_idx(env_ids)
-
-        # ============ Target Point 리셋 ===============
-        # object(=target point) reset : Location
-        loc_noise_x = sample_uniform(-0.15, 0.15, (len(env_ids), 1), device=self.device)
-        loc_noise_y = sample_uniform(-0.3, 0.3, (len(env_ids), 1), device=self.device)
-        loc_noise_z = torch.full((len(env_ids), 1), self.obj_width[0].item()/2, device=self.device)
-        loc_noise = torch.cat([loc_noise_x, loc_noise_y, loc_noise_z], dim=-1)
         object_default_state = self._object.data.default_root_state[env_ids]
-        object_default_state[:, :3] += loc_noise + self.scene.env_origins[env_ids, :3]
+
+
+        # ============ Object Pose & Sub-goal 리셋 ===============
+        # object(=target point) reset : Location
+        pick_loc_noise_x = sample_uniform(-0.15, 0.15, (len(env_ids), 1), device=self.device)
+        pick_loc_noise_y = sample_uniform(-0.3, 0.3, (len(env_ids), 1), device=self.device)
+        pick_loc_noise_z = torch.full((len(env_ids), 1), self.obj_width[0].item()/2, device=self.device)
+        pick_loc_noise = torch.cat([pick_loc_noise_x,pick_loc_noise_y, pick_loc_noise_z], dim=-1)
 
         # Object(=target point) reset : Rotation
         # 1. Alignment with TCP Axis
@@ -356,7 +361,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # 2. Z-axis Randomization
         rot_noise_z = sample_uniform(-0.8, 0.8, (len(env_ids), ), device=self.device)
         rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
-        # 3. Apply Quaternion
+ 
+        # Apply Randomization
+        object_default_state[:, :3] += pick_loc_noise + self.scene.env_origins[env_ids, :3]
         object_default_state[:, 3:7] = quat_mul(tcp_quat, rot_noise)
 
         # Pose calculation for root frame variables
@@ -369,15 +376,40 @@ class FrankaGraspEnv(FrankaBaseEnv):
             object_default_pos_w[:, :3], object_default_pos_w[:, 3:7]
         ), dim=1)
 
+    
+        # ================== Retract Point 리셋 =================
         # Setting Final Goal 3D Location
         self.object_target_pos_w[env_ids, :3] = object_default_pos_w[:, :3] + 0.2 * self.z_unit_tensor[env_ids]
-        # Setting Final Goal 3D Rotation -> Standard XYZ axis
+        # Setting Final Goal 3D Rotation -> Aligned XYZ axis with TCP
         self.object_target_pos_w[env_ids, 3:7] = object_default_state[:, 3:7]
         self.object_target_pos_b[env_ids, :] = torch.cat(subtract_frame_transforms(
             self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7], 
             self.object_target_pos_w[env_ids, :3], self.object_target_pos_w[env_ids, 3:7]
         ), dim=1)
 
+
+        # ================= Place Point 리셋 ==================
+        object_default_state = self._object.data.default_root_state[env_ids]
+
+        place_loc_noise_x = pick_loc_noise_x
+        place_loc_noise_y = -pick_loc_noise_y
+        place_loc_noise_z = pick_loc_noise_z
+        place_loc_noise = torch.cat([place_loc_noise_x, place_loc_noise_y, place_loc_noise_z], dim=-1)
+
+        tcp_quat = quat_from_matrix(self.tcp_unit_tensor[env_ids])
+        rot_noise_z = sample_uniform(-0.8, 0.8, (len(env_ids), ), device=self.device)
+        rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
+
+        object_default_state[:, :3] += place_loc_noise + self.scene.env_origins[env_ids, :3]
+        object_default_state[:, 3:7] = quat_mul(tcp_quat, rot_noise)
+
+        self.object_place_pos_w[env_ids] = object_default_state[:, :7]
+        self.object_place_pos_b[env_ids] = torch.cat(subtract_frame_transforms(
+            self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7],
+            self.object_place_pos_w[env_ids, :3], self.object_place_pos_w[env_ids, 3:7]
+        ), dim=1)
+        
+        # ============= State 업데이트 ===============
         self._object.write_root_pose_to_sim(object_default_state[:, :7], env_ids)
         self._object.write_root_velocity_to_sim(object_default_state[:, 7:], env_ids)
 
@@ -415,43 +447,54 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
                                                                 self.object_target_pos_b[env_ids, 3:7])
             
-            # self.prev_retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
-            #                                         self.object_target_pos_b[env_ids, :3], dim=1)
-            
-            # self.prev_retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
-            #                                                   self.object_target_pos_b[env_ids, 3:7])
             self.prev_retract_error[env_ids, 0] = torch.norm(self.object_pos_b[env_ids, :3] - \
-                                                    self.object_target_pos_b[env_ids, :3], dim=1)
+                                                             self.object_target_pos_b[env_ids, :3], dim=1)
             
             self.prev_retract_error[env_ids, 1] = quat_error_magnitude(self.object_pos_b[env_ids, 3:7], 
-                                                              self.object_target_pos_b[env_ids, 3:7])
-
+                                                                       self.object_target_pos_b[env_ids, 3:7])
             
+            self.prev_place_error[env_ids, 0] = torch.norm(self.object_pos_b[env_ids, :3] - \
+                                                           self.object_place_pos_b[env_ids, :3], dim=1)
+            
+            self.prev_place_error[env_ids, 1] = quat_error_magnitude(self.object_pos_b[env_ids, 3:7],
+                                                                     self.object_place_pos_b[env_ids, 3:7])
+
             self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
         else:
             self.prev_loc_error[env_ids] = self.loc_error[env_ids]
             self.prev_rot_error[env_ids] = self.rot_error[env_ids]
             self.prev_retract_error[env_ids] = self.retract_error[env_ids]    
+            self.prev_place_error[env_ids] = self.place_error[env_ids]
             self.prev_grasp[env_ids] = self.is_grasp.clone() 
 
 
         # ========= Position Error 업데이트 =========
-        # Location
-        # self.loc_error[env_ids] = torch.norm(
-        #     self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3], dim=1)
+        # Approach : Location
         loc_error_xyz = torch.abs(self.robot_grasp_pos_b[env_ids, :3] - self.object_pos_b[env_ids, :3])
         self.loc_error[env_ids] = torch.sqrt(self.cfg.wx * torch.square(loc_error_xyz[:, 0]) +
                                              self.cfg.wy * torch.square(loc_error_xyz[:, 1]) + 
                                              self.cfg.wz * torch.square(loc_error_xyz[:, 2])).squeeze(-1)
-        # Rotation -> Pre-defined angle (TCP 정렬 각)
+        # Appraoch : Rotation -> Pre-defined angle (TCP 정렬 각)
         self.rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
                                                        self.object_target_pos_b[env_ids, 3:7])
-        # Retract
-        self.retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
+        
+        # Retract : Location
+        self.retract_error[env_ids, 0] = torch.norm(self.object_pos_b[env_ids, :3] - \
                                                     self.object_target_pos_b[env_ids, :3], dim=1)
-        self.retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
+        # Retract : Rotation
+        self.retract_error[env_ids, 1] = quat_error_magnitude(self.object_pos_b[env_ids, 3:7], 
                                                               self.object_target_pos_b[env_ids, 3:7])
-        # Phase Signal
+        
+        # Place : Location
+        place_error_xyz = torch.abs(self.object_pos_b[env_ids, :3] - self.object_place_pos_b[env_ids, :3])
+        self.place_error[env_ids, 0] = torch.sqrt(self.cfg.wx * torch.square(place_error_xyz[:, 0]) +
+                                                  self.cfg.wy * torch.square(place_error_xyz[:, 1]) + 
+                                                  self.cfg.wz * torch.square(place_error_xyz[:, 2])).squeeze(-1)
+        # Retract : Rotation
+        self.place_error[env_ids, 1] = quat_error_magnitude(self.object_pos_b[env_ids, 3:7],
+                                                            self.object_place_pos_b[env_ids, 3:7])
+
+        # ============ Phase Signal 업데이트 ============
         if self.cfg.w_rot > 0.0:
             self.is_reach[env_ids] = torch.logical_and(self.loc_error[env_ids] < 5e-2, self.rot_error[env_ids] < 1e-1)
         else:
