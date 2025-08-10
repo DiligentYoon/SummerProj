@@ -273,6 +273,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.sub_goal_w[:, :3], self.sub_goal_w[:, 3:7])
         sub_goal_pos_tcp = torch.cat([sub_goal_loc_tcp, sub_goal_rot_tcp], dim=1)
 
+        goal_pos_obj = torch.cat(subtract_frame_transforms(
+            self.object_pos_w[:, :3], self.object_pos_w[:, 3:7], self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7]), dim=1)
+
         goal_pos_tcp = torch.cat(subtract_frame_transforms(
             self.robot_grasp_pos_w[:, :3], self.robot_grasp_pos_w[:, 3:7], self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7]), dim=1)
 
@@ -282,14 +285,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         current_goal_info_tcp = torch.where(self.is_grasp.unsqueeze(-1),
                                             goal_pos_tcp,
                                             sub_goal_pos_tcp)
-        
-        current_goal_dist_loc = torch.where(self.is_grasp,
-                                            self.retract_error[:, 0],
-                                            self.loc_error).unsqueeze(-1)
-        
-        current_goal_dist_rot = torch.where(self.is_grasp,
-                                            self.retract_error[:, 1],
-                                            self.rot_error).unsqueeze(-1)
         
         if len(self.success_buffer) > 0:
             self.extras["log"]["epi_success_rate"] = torch.tensor(sum(self.success_buffer) / len(self.success_buffer), device=self.device)
@@ -305,6 +300,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 self.robot_joint_vel[:, 0:self.num_active_joints+2],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,
+                # Goal Info w.r.t Object frame (7)
+                goal_pos_obj,
                 # Goal Info w.r.t body frame (7)
                 current_goal_info_b,
                 # Goal Info w.r.t TCP frame (7)
@@ -418,11 +415,17 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_rot_error[env_ids] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7],
                                                                 self.object_target_pos_b[env_ids, 3:7])
             
-            self.prev_retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
+            # self.prev_retract_error[env_ids, 0] = torch.norm(self.robot_grasp_pos_b[env_ids, :3] - \
+            #                                         self.object_target_pos_b[env_ids, :3], dim=1)
+            
+            # self.prev_retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
+            #                                                   self.object_target_pos_b[env_ids, 3:7])
+            self.prev_retract_error[env_ids, 0] = torch.norm(self.object_pos_b[env_ids, :3] - \
                                                     self.object_target_pos_b[env_ids, :3], dim=1)
             
-            self.prev_retract_error[env_ids, 1] = quat_error_magnitude(self.robot_grasp_pos_b[env_ids, 3:7], 
+            self.prev_retract_error[env_ids, 1] = quat_error_magnitude(self.object_pos_b[env_ids, 3:7], 
                                                               self.object_target_pos_b[env_ids, 3:7])
+
             
             self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
         else:
