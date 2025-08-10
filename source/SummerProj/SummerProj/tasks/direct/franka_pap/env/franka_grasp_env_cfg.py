@@ -19,10 +19,10 @@ from ..base.franka_base_env_cfg import FrankaBaseEnvCfg
 @configclass
 class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # env
-    episode_length_s = 10.0
+    episode_length_s = 15.0
     decimation = 5
     action_space = 22
-    observation_space = 47
+    observation_space = 54
     state_space = 0
 
     # simulation
@@ -57,8 +57,8 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
             ),
         )
     
-    # goal marker
-    goal_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+    # marker
+    retract_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
         prim_path="Visuals/goal_marker",
         markers={
         "frame": sim_utils.UsdFileCfg(
@@ -68,8 +68,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
         }
     )
 
-    # object marker
-    object_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+    place_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
         prim_path="Visuals/object_marker",
         markers={
         "frame": sim_utils.UsdFileCfg(
@@ -82,16 +81,24 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
 
     # reward hyperparameter
     alpha, beta = 3.0, 3.0
+
     w_pos = 20.0
     w_rot = 10.0
-    w_penalty = 0.001
-    w_contact = 0.01
+
     w_loc_retract = 45.0
     w_rot_retract = 10.0
+
+    w_loc_place = 45.0
+    w_rot_place = 10.0
+
     w_grasp = 1.5
-    w_reach = 1.0
+    w_retract = 2.0
     w_success = 300.0
+
     wx = 4.0
     wy = 4.0
     wz = 1.0
+
+    w_penalty = 0.001
+    w_contact = 0.01
     w_ps = 1.0
