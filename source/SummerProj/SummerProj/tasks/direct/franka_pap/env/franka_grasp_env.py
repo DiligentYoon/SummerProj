@@ -47,6 +47,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # Object Move Checker & Success Checker
         self.prev_place_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.prev_retract_error = torch.zeros((self.num_envs, 2), device=self.device)
+        self.prev_approach_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.prev_loc_error = torch.zeros(self.num_envs, device=self.device)
         self.prev_rot_error = torch.zeros(self.num_envs, device=self.device)
 
@@ -169,10 +170,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
         done = terminated | truncated
 
         if torch.any(done):
-            done_env_ids = torch.where(done)[0]
-            for env_id in done_env_ids:
-                self.success_buffer.append(self.is_success[env_id].float().item())
-                self.grasp_buffer.append(self.is_grasp[env_id].float().item())
+            done_ids = torch.where(done)[0]
+
+            self.success_buffer.extend(
+                self.is_success.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+            self.grasp_buffer.extend(
+                self.is_grasp.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
 
         return terminated, truncated
         
