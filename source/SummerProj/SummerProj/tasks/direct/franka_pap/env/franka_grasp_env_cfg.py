@@ -81,18 +81,26 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
 
     # reward hyperparameter
     alpha, beta = 3.0, 3.0
+    alpha_retract, beta_retract = 9.0, 9.0
+    alpha_place, beta_place = 16.0, 16.0
 
     w_pos = 20.0
     w_rot = 10.0
 
-    w_loc_retract = 45.0
+    # w_loc_retract = 45.0
+    # w_rot_retract = 10.0
+    w_loc_retract = 20.0
     w_rot_retract = 10.0
 
-    w_loc_place = 60.0
-    w_rot_place = 30.0
+    # w_loc_place = 50.0
+    # w_rot_place = 25.0
+    w_loc_place = 20.0
+    w_rot_place = 10.0
 
-    w_grasp = 1.5
-    w_retract = 2.0
+    # w_grasp = 1.5
+    # w_retract = 4.5
+    w_grasp = 3.0
+    w_retract = 6.0
     w_success = 300.0
 
     wx = 4.0

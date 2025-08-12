@@ -52,8 +52,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.place_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.retract_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.approach_error = torch.zeros((self.num_envs, 2), device=self.device)
-        # self.loc_error = torch.zeros(self.num_envs, device=self.device)
-        # self.rot_error = torch.zeros(self.num_envs, device=self.device)
 
         self.weighted_approach_error = torch.zeros((self.num_envs, 2), device=self.device)
         self.weighted_place_error = torch.zeros((self.num_envs, 2), device=self.device)
@@ -62,11 +60,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         self.is_reach = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-        self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_retract = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         
+        self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.prev_retract = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
 
         # Domain Randomization Scale
         self.noise_scale = torch.tensor(
@@ -168,6 +167,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
     def _get_dones(self):
         self._compute_intermediate_values()
         drop = torch.logical_and(self.prev_grasp, ~self.is_grasp) | torch.logical_and(self.object_pos_w[:, 2] < 0, ~self.is_grasp)
+        # drop 조건은 retract시에 무효
+        in_place = (self.is_retract) & (self.place_error[:, 0] < 5e-2 * 4)
+
+        drop = drop & ~in_place
+
         terminated = self.is_success | drop | self.is_contact
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
@@ -204,10 +208,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         r_grasp = self.is_grasp.float()
 
         # 2. Retract Error Bonus
-        phi_s_prime_retract_loc = -torch.log(self.cfg.alpha * self.retract_error[:, 0] + 1)
-        phi_s_prime_retract_rot = -torch.log(self.cfg.alpha * self.retract_error[:, 1] + 1)
-        phi_s_retract_loc = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 0] + 1)
-        phi_s_retract_rot = -torch.log(self.cfg.alpha * self.prev_retract_error[:, 1] + 1)
+        phi_s_prime_retract_loc = -torch.log(self.cfg.alpha_retract * self.retract_error[:, 0] + 1)
+        phi_s_prime_retract_rot = -torch.log(self.cfg.alpha_retract * self.retract_error[:, 1] + 1)
+        phi_s_retract_loc = -torch.log(self.cfg.alpha_retract * self.prev_retract_error[:, 0] + 1)
+        phi_s_retract_rot = -torch.log(self.cfg.alpha_retract * self.prev_retract_error[:, 1] + 1)
 
         r_retract_loc = torch.max(torch.zeros(1, device=self.device), 
                                   (gamma * phi_s_prime_retract_loc - phi_s_retract_loc))
@@ -220,10 +224,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         r_retract = self.is_retract.float()
 
         # Place Error Bonus
-        phi_s_prime_place_loc = -torch.log(self.cfg.alpha * self.weighted_place_error[:, 0] + 1)
-        phi_s_prime_place_rot = -torch.log(self.cfg.alpha * self.weighted_place_error[:, 1] + 1)
-        phi_s_place_loc = -torch.log(self.cfg.alpha * self.prev_weighted_place_error[:, 0] + 1)
-        phi_s_place_rot = -torch.log(self.cfg.alpha * self.prev_weighted_place_error[:, 1] + 1)
+        phi_s_prime_place_loc = -torch.log(self.cfg.alpha_place * self.weighted_place_error[:, 0] + 1)
+        phi_s_prime_place_rot = -torch.log(self.cfg.alpha_place * self.weighted_place_error[:, 1] + 1)
+        phi_s_place_loc = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 0] + 1)
+        phi_s_place_rot = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 1] + 1)
 
         r_place_loc = torch.max(torch.zeros(1, device=self.device), 
                                 (gamma * phi_s_prime_place_loc - phi_s_place_loc))
@@ -471,13 +475,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
 
             self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
+            self.prev_retract[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
         else:
             self.prev_weighted_approach_error[env_ids] = self.weighted_approach_error[env_ids]
             self.prev_weighted_place_error[env_ids] = self.weighted_place_error[env_ids]
             self.prev_approach_error[env_ids] = self.approach_error[env_ids]
             self.prev_retract_error[env_ids] = self.retract_error[env_ids]    
             self.prev_place_error[env_ids] = self.place_error[env_ids]
-            self.prev_grasp[env_ids] = self.is_grasp.clone() 
+            self.prev_grasp[env_ids] = self.is_grasp.clone()
+            self.prev_retract[env_ids] = self.is_retract.clone()
 
 
         # ========= Position Error 업데이트 =========
@@ -522,18 +528,21 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         self.weighted_place_error[env_ids, 1] = self.place_error[env_ids, 1]
 
+
         # ============ Phase Signal 업데이트 ============
         if self.cfg.w_rot > 0.0:
-            self.is_reach[env_ids] = torch.logical_and(self.approach_error[env_ids, 0] < 5e-2, self.approach_error[env_ids, 1] < 1e-1)
+            self.is_reach[env_ids] = torch.logical_or(torch.logical_and(self.approach_error[env_ids, 0] < 5e-2, self.approach_error[env_ids, 1] < 1e-1),
+                                                      self.prev_retract[env_ids])
         else:
             self.is_reach[env_ids] = self.approach_error[env_ids, 0] < 5e-2
 
         self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], 
                                                    self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(5e-2, device=self.device), self.obj_width[0]/2))
         
-        self.is_retract[env_ids] = torch.logical_and(self.is_grasp[env_ids], 
-                                                     torch.logical_and(self.retract_error[env_ids, 0] < 5e-2,
-                                                                       self.retract_error[env_ids, 1] < 1e-1))
+        self.is_retract[env_ids] = torch.logical_or(torch.logical_and(self.is_grasp[env_ids], 
+                                                                      torch.logical_and(self.retract_error[env_ids, 0] < 5e-2,
+                                                                                        self.retract_error[env_ids, 1] < 1e-1)),
+                                                    self.prev_retract[env_ids])
 
         self.is_success[env_ids] = torch.logical_and(self.is_retract[env_ids], 
                                                      torch.logical_and(self.place_error[env_ids, 0] < 5e-2,
