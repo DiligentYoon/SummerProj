@@ -292,12 +292,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                         sub_goal_pos_tcp))
 
 
-        current_goal_info_b = torch.where(self.is_grasp.unsqueeze(-1),
-                                          self.object_target_pos_b,
-                                          self.sub_goal_b)
-        current_goal_info_tcp = torch.where(self.is_grasp.unsqueeze(-1),
-                                            retract_pos_tcp,
-                                            sub_goal_pos_tcp)
+        # current_goal_info_b = torch.where(self.is_grasp.unsqueeze(-1),
+        #                                   self.object_target_pos_b,
+        #                                   self.sub_goal_b)
+        # current_goal_info_tcp = torch.where(self.is_grasp.unsqueeze(-1),
+        #                                     retract_pos_tcp,
+        #                                     sub_goal_pos_tcp)
         
         if len(self.success_buffer) > 0:
             self.extras["log"]["epi_success_rate"] = torch.tensor(sum(self.success_buffer) / len(self.success_buffer), device=self.device)
