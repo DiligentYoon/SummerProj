@@ -290,14 +290,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                             torch.where(self.is_grasp.unsqueeze(-1),
                                                         retract_pos_tcp,
                                                         sub_goal_pos_tcp))
+        
+        current_goal_info_obj = torch.where(self.is_retract.unsqueeze(-1),
+                                            place_pos_obj,
+                                            retract_pos_obj)
 
-
-        # current_goal_info_b = torch.where(self.is_grasp.unsqueeze(-1),
-        #                                   self.object_target_pos_b,
-        #                                   self.sub_goal_b)
-        # current_goal_info_tcp = torch.where(self.is_grasp.unsqueeze(-1),
-        #                                     retract_pos_tcp,
-        #                                     sub_goal_pos_tcp)
         
         if len(self.success_buffer) > 0:
             self.extras["log"]["epi_success_rate"] = torch.tensor(sum(self.success_buffer) / len(self.success_buffer), device=self.device)
@@ -313,16 +310,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 self.robot_joint_vel[:, 0:self.num_active_joints+2],
                 # TCP 6D pose w.r.t Root frame (7)
                 self.robot_grasp_pos_b,
-                # Retract 6D Pose w.r.t Object frame (7)
-                retract_pos_obj,
-                # Place 6D Pose w.r.t Object frame (7)
-                place_pos_obj,
                 # Goal Info w.r.t body frame (7)
                 current_goal_info_b,
                 # Goal Info w.r.t TCP frame (7)
                 current_goal_info_tcp,
+                # Goal Info w.r.t Obj frame (7)
+                current_goal_info_obj,
                 # Current Phase Info (1)
-                self.is_grasp.unsqueeze(-1)
+                self.is_grasp.unsqueeze(-1),
+                self.is_retract.unsqueeze(-1)
             ), dim=1
         )
 

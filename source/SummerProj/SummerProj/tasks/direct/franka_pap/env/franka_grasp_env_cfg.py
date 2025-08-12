@@ -22,7 +22,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     episode_length_s = 15.0
     decimation = 5
     action_space = 22
-    observation_space = 54
+    observation_space = 48
     state_space = 0
 
     # simulation
