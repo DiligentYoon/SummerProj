@@ -100,8 +100,8 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # w_grasp = 1.5
     # w_retract = 4.5
     w_grasp = 6.0
-    w_retract = 12.0
-    w_success = 1000.0
+    w_retract = 6.0
+    w_success = 2000.0
 
     wx = 4.0
     wy = 4.0
@@ -109,5 +109,5 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
 
     w_penalty = 0.001
     w_contact = 0.01
-    w_ps = 2.0
-    # w_ps = 1.0
+    # w_ps = 2.0
+    w_ps = 1.0

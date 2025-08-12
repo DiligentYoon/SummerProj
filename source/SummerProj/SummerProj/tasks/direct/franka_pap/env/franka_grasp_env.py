@@ -62,6 +62,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_retract = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.is_in_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         
         self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
@@ -547,6 +548,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_success[env_ids] = torch.logical_and(self.is_retract[env_ids], 
                                                      torch.logical_and(self.place_error[env_ids, 0] < 5e-2,
                                                                        self.place_error[env_ids, 1] < 1e-1))
+        
+        self.is_in_place[env_ids] = (self.is_retract[env_ids]) & (self.place_error[env_ids, 0] < 5e-2 * 4)
+
+
+        # retract에서 place zone인 경우, grasp 조건 무효
+        self.is_grasp[env_ids] = (self.is_grasp[env_ids]) | (self.is_in_place[env_ids])
+
         
         if not reset:
             self.is_contact[env_ids] = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
