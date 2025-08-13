@@ -341,28 +341,28 @@ def main():
 
 
             # --- 각 env i에 대해 한 줄씩 로깅 ---
-            for i in range(num_envs):
-                row = {}
+            # for i in range(num_envs):
+            #     row = {}
 
-                # --- t+1 시점 ---
-                row.update(_row_flat("des_q",   robot_info["impedance_desired_joint_pos"][i]))
-                row.update(_row_flat("kp",      robot_info["impedance_stiffness"][i]))
-                row.update(_row_flat("zeta",    robot_info["impedance_damping"][i]))
-                row.update(_row_flat("q",       robot_info["joint_pos"][i]))
-                row.update(_row_flat("dq",      robot_info["joint_vel"][i]))
-                row.update(_row_flat("tcpvel",  robot_info["hand_vel"][i]))
-                row.update(_row_flat("rewards", robot_info["total_reward"][i]))
+            #     # --- t+1 시점 ---
+            #     row.update(_row_flat("des_q",   robot_info["impedance_desired_joint_pos"][i]))
+            #     row.update(_row_flat("kp",      robot_info["impedance_stiffness"][i]))
+            #     row.update(_row_flat("zeta",    robot_info["impedance_damping"][i]))
+            #     row.update(_row_flat("q",       robot_info["joint_pos"][i]))
+            #     row.update(_row_flat("dq",      robot_info["joint_vel"][i]))
+            #     row.update(_row_flat("tcpvel",  robot_info["hand_vel"][i]))
+            #     row.update(_row_flat("rewards", robot_info["total_reward"][i]))
 
-                # 로깅
-                logger.log_step(env_id=i, ep_id=int(ep_id[i]), step_idx=int(step_in_ep[i]), row_dict=row)
+            #     # 로깅
+            #     logger.log_step(env_id=i, ep_id=int(ep_id[i]), step_idx=int(step_in_ep[i]), row_dict=row)
 
-                # done이면 시트로 Flush
-                if bool(done[i]):
-                    logger.end_episode(env_id=i, ep_id=int(ep_id[i]))
-                    ep_id[i] += 1
-                    step_in_ep[i] = 0
-                else:
-                    step_in_ep[i] += 1
+            #     # done이면 시트로 Flush
+            #     if bool(done[i]):
+            #         logger.end_episode(env_id=i, ep_id=int(ep_id[i]))
+            #         ep_id[i] += 1
+            #         step_in_ep[i] = 0
+            #     else:
+            #         step_in_ep[i] += 1
 
 
 
