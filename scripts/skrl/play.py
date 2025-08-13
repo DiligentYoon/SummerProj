@@ -25,7 +25,7 @@ parser.add_argument(
 )
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default="Franka-Grasp-Direct-v0", help="Name of the task.")
-parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
+parser.add_argument("--checkpoint", type=str, default="C:/SummerProj/logs/skrl/franka_approach/2025-08-13_13-01-28_ppo_torch/checkpoints/agent_32000.pt", help="Path to model checkpoint.")
 parser.add_argument(
     "--use_pretrained_checkpoint",
     action="store_true",
@@ -64,6 +64,7 @@ import gymnasium as gym
 import os
 import time
 import torch
+import copy
 
 import skrl
 from packaging import version
@@ -177,35 +178,226 @@ def main():
     # reset environment
     obs, _ = env.reset()
     timestep = 0
-    # simulate environment
+
+    # ---- set once ----
+    gamma = 0.99
+    eps_d_place = 0.05   # 거리 경계 (원하는 값으로)
+    eps_a_place = 0.10   # 각도 경계 (라디안 기준)
+    eps_d_retract = 0.05   # 거리 경계 (원하는 값으로)
+    eps_a_retract = 0.10   # 각도 경계 (라디안 기준)
+    eps_d_approach = 0.05   # 거리 경계 (원하는 값으로)
+    eps_a_approach = 0.10   # 각도 경계 (라디안 기준)
+
+    # 누적 통계 (전이/잔류)
+    A_T_sum_p = A_T_cnt_p = 0.0
+    A_S_sum_p = A_S_cnt_p = 0.0
+    A_T_sum_r = A_T_cnt_r = 0.0
+    A_S_sum_r = A_S_cnt_r = 0.0
+    A_T_sum_g = A_T_cnt_g = 0.0
+    A_S_sum_g = A_S_cnt_g = 0.0
+
+    # 이전 단계의 phase id와 V(s_t)를 저장
+    prev_phase_id = None
+    prev_V = None
+    prev_probe = None  # 이전 스텝의 probe (phase 판정t에 필요)
+
+    # ---- 상수 인코딩 ----
+    APPR, GRASP, RETRACT, PLACE = 0, 1, 2, 3
+
+    timestep = 0
     while simulation_app.is_running():
         start_time = time.time()
 
-        # run everything in inference mode
         with torch.inference_mode():
-            # agent stepping
-            outputs = runner.agent.act(obs, timestep=0, timesteps=0)
-            # - multi-agent (deterministic) actions
-            if hasattr(env, "possible_agents"):
-                actions = {a: outputs[-1][a].get("mean_actions", outputs[0][a]) for a in env.possible_agents}
-            # - single-agent (deterministic) actions
-            else:
-                actions = outputs[-1].get("mean_actions", outputs[0])
-            # env stepping
-            obs, _, _, _, info = env.step(actions)
+            # 1) 현재 상태에서 V(s_t)
+            V_t, _, _ = runner.agent.value.act({"states": runner.agent._state_preprocessor(obs)}, role="value")
+            V_t = V_t.squeeze(-1)  # [N] 가정
+
+            # 2) 정책 행동
+            outs = runner.agent.act(obs, timestep=0, timesteps=0)
+            actions = outs[-1].get("mean_actions", outs[0])  # single-agent 가정
+
+            # 3) 환경 전개 → s_{t+1}, r_t, d_t, info_{t+1}
+            obs_next, reward, terminated, truncated, info = env.step(actions)
+            done = terminated | truncated
+
+            # 4) V(s_{t+1})
+            V_tp1, _, _ = runner.agent.value.act({"states": runner.agent._state_preprocessor(obs_next)}, role="value")
+            V_tp1 = V_tp1.squeeze(-1)
+
+            # 5) TD(1) advantage: A_t
+            # (배치 [N] 환경 기준, 텐서 연산)
+            A_t = reward + gamma * (1.0 - done.float()) * V_tp1 - V_t   # shape [N]
+
+            # 6) Phase/오류 정보 가져오기 (t와 t+1 비교 위해)
+            probe_tp1 = copy.deepcopy(info["probe"])
+            assert probe_tp1 is not None, "env.extras['probe']가 info로 전달되도록 env를 보강하세요."
+
+            # phase id 인코딩: Approach=0, Grasp=1, Retract=2, Place=3
+            # (Place는 is_success 전/후 모두 3으로 취급)
+            def encode_phase(p) ->torch.Tensor:
+                # 텐서 bool -> long
+                is_g = p["is_grasp"].long()
+                is_r = p["is_retract"].long()
+                is_s = p["is_success"].long()
+                # 우선순위: success>retract>grasp>approach
+                return torch.where(is_s==1, torch.full_like(is_g, 3),
+                    torch.where(is_r==1, torch.full_like(is_g, 2),
+                    torch.where(is_g==1, torch.full_like(is_g, 1),
+                                torch.zeros_like(is_g))))
+
+            # t시점 phase는 이전 스텝의 probe로부터
+            if prev_probe is None:
+                # 첫 스텝은 비교 불가 → 다음 스텝부터 집계
+                prev_probe = probe_tp1
+                obs = obs_next
+                # real-time sleep
+                if args_cli.real_time:
+                    sleep_time = dt - (time.time() - start_time)
+                    if sleep_time > 0: time.sleep(sleep_time)
+                continue
+
+            # t 시점으로부터 (prev_probe 사용!)
+            probe_t  = prev_probe
+            phase_t  = encode_phase(probe_t)      # [N]
+            phase_tp1= encode_phase(probe_tp1)    # [N]
+
+            # 7) 경계 근처(t 기준)
+            near_grasp   = (probe_t["approach_loc"] <= eps_d_approach*2) & (probe_t["approach_rot"] <= eps_a_approach*2)
+            near_retract = (probe_t["retract_loc"]  <= eps_d_retract*2)  & (probe_t["retract_rot"]  <= eps_a_retract*2)
+            near_place   = (probe_t["place_loc"]    <= eps_d_place*2)    & (probe_t["place_rot"]    <= eps_a_place*2)
+
+            # 8) 전이/잔류 마스크 (방향별로 분해)
+            to_grasp      = (phase_t == APPR)    & (phase_tp1 == GRASP)      # APPR -> GRASP (정방향)
+            back_from_g   = (phase_t == GRASP)   & (phase_tp1 == APPR)       # GRASP -> APPR (역방향)
+            stay_appr     = (phase_t == APPR)    & (phase_tp1 == APPR)
+
+            to_retract    = (phase_t == GRASP)   & (phase_tp1 == RETRACT)    # GRASP -> RETRACT (정방향)
+            back_from_r   = (phase_t == RETRACT) & (phase_tp1 == GRASP)      # RETRACT -> GRASP (역방향)
+            stay_grasp    = (phase_t == GRASP)   & (phase_tp1 == GRASP)
+
+            to_place      = (phase_t == RETRACT) & (phase_tp1 == PLACE)      # RETRACT -> PLACE (정방향)
+            back_from_p   = (phase_t == PLACE)   & (phase_tp1 == RETRACT)    # PLACE -> RETRACT (역방향)
+            stay_retract  = (phase_t == RETRACT) & (phase_tp1 == RETRACT)
+
+            print(f"Phase : {phase_tp1}")
+
+            # 9) 경계별로 ΔA 집계
+            # Grasp 경계: APPR 근처에서 APPR에 머무름 vs GRASP로 전이
+            mask_T_g = near_grasp & to_grasp
+            mask_S_g = near_grasp & stay_appr
+            if mask_T_g.any():
+                A_T_sum_g += A_t[mask_T_g].sum().item()
+                A_T_cnt_g += mask_T_g.sum().item()
+            if mask_S_g.any():
+                A_S_sum_g += A_t[mask_S_g].sum().item()
+                A_S_cnt_g += mask_S_g.sum().item()
+
+            # Retract 경계: GRASP 근처에서 GRASP에 머무름 vs RETRACT로 전이
+            mask_T_r = near_retract & to_retract
+            mask_S_r = near_retract & stay_grasp
+            if mask_T_r.any():
+                A_T_sum_r += A_t[mask_T_r].sum().item()
+                A_T_cnt_r += mask_T_r.sum().item()
+            if mask_S_r.any():
+                A_S_sum_r += A_t[mask_S_r].sum().item()
+                A_S_cnt_r += mask_S_r.sum().item()
+
+            # Place 경계: RETRACT 근처에서 RETRACT에 머무름 vs PLACE로 전이
+            mask_T_p = near_place & to_place
+            mask_S_p = near_place & stay_retract
+            if mask_T_p.any():
+                A_T_sum_p += A_t[mask_T_p].sum().item()
+                A_T_cnt_p += mask_T_p.sum().item()
+            if mask_S_p.any():
+                A_S_sum_p += A_t[mask_S_p].sum().item()
+                A_S_cnt_p += mask_S_p.sum().item()
+
+            # Next Loops
+            prev_probe = probe_tp1
+            prev_phase_id = phase_tp1
+            prev_V = V_tp1
+            obs = obs_next
+
+        # 주기적으로 화면에 ΔA 출력
+        timestep += 1
+        if timestep % 50 == 0:
+            A_T_mean_g = A_T_sum_g / max(1, A_T_cnt_g)
+            A_S_mean_g = A_S_sum_g / max(1, A_S_cnt_g)
+            print(f"[Grasp boundary] E[A|transition]={A_T_mean_g:.4f}  E[A|stay]={A_S_mean_g:.4f}  Δ={A_T_mean_g - A_S_mean_g:.4f}")
+
+            A_T_mean_r = A_T_sum_r / max(1, A_T_cnt_r)
+            A_S_mean_r = A_S_sum_r / max(1, A_S_cnt_r)
+            print(f"[Retract boundary] E[A|transition]={A_T_mean_r:.4f}  E[A|stay]={A_S_mean_r:.4f}  Δ={A_T_mean_r - A_S_mean_r:.4f}")
+
+            A_T_mean_p = A_T_sum_p / max(1, A_T_cnt_p)
+            A_S_mean_p = A_S_sum_p / max(1, A_S_cnt_p)
+            print(f"[Place boundary] E[A|transition]={A_T_mean_p:.4f}  E[A|stay]={A_S_mean_p:.4f}  Δ={A_T_mean_p - A_S_mean_p:.4f}")
+
+
+
+
+
+        # 비디오/리얼타임 처리
         if args_cli.video:
-            timestep += 1
-            # exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
+        if args_cli.real_time:
+            sleep_time = dt - (time.time() - start_time)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
-        # time delay for real-time evaluation
-        sleep_time = dt - (time.time() - start_time)
-        if args_cli.real_time and sleep_time > 0:
-            time.sleep(sleep_time)
+    # 최종 ΔA 출력
+    A_T_mean_p = A_T_sum_p / max(1, A_T_cnt_p)
+    A_S_mean_p = A_S_sum_p / max(1, A_S_cnt_p)
+    print(f"[FINAL] ΔA (Place boundary) = {A_T_mean_p - A_S_mean_p:.4f}  "
+        f"(transition={A_T_mean_p:.4f}, stay={A_S_mean_p:.4f}")
+    
+    A_T_mean_r = A_T_sum_r / max(1, A_T_cnt_r)
+    A_S_mean_r = A_S_sum_r / max(1, A_S_cnt_r)
+    print(f"[FINAL] ΔA (Retract boundary) = {A_T_mean_r - A_S_mean_r:.4f}  "
+        f"(transition={A_T_mean_r:.4f}, stay={A_S_mean_r:.4f}")
+    
+    A_T_mean_g = A_T_sum_g / max(1, A_T_cnt_g)
+    A_S_mean_g = A_S_sum_g / max(1, A_S_cnt_g)
+    print(f"[FINAL] ΔA (Grasp boundary) = {A_T_mean_g - A_S_mean_g:.4f}  "
+        f"(transition={A_T_mean_g:.4f}, stay={A_S_mean_g:.4f}")
+    
 
     # close the simulator
     env.close()
+
+    # # simulate environment
+    # while simulation_app.is_running():
+    #     start_time = time.time()
+
+    #     # run everything in inference mode
+    #     with torch.inference_mode():
+    #         # agent stepping
+    #         outputs = runner.agent.act(obs, timestep=0, timesteps=0)
+    #         values, _, _ = runner.agent.value.act({"states": runner.agent._state_preprocessor(obs)}, role="value")
+    #         v_t = values.squeeze(-1)
+    #         # - multi-agent (deterministic) actions
+    #         if hasattr(env, "possible_agents"):
+    #             actions = {a: outputs[-1][a].get("mean_actions", outputs[0][a]) for a in env.possible_agents}
+    #         # - single-agent (deterministic) actions
+    #         else:
+    #             actions = outputs[-1].get("mean_actions", outputs[0])
+    #         # env stepping
+    #         obs, _, _, _, info = env.step(actions)
+    #     if args_cli.video:
+    #         timestep += 1
+    #         # exit the play loop after recording one video
+    #         if timestep == args_cli.video_length:
+    #             break
+
+    #     # time delay for real-time evaluation
+    #     sleep_time = dt - (time.time() - start_time)
+    #     if args_cli.real_time and sleep_time > 0:
+    #         time.sleep(sleep_time)
+
+    # # close the simulator
+    # env.close()
 
 
 if __name__ == "__main__":

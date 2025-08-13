@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import collections
-import numpy as np
+import copy
 import torch
 from isaaclab.utils.math import quat_error_magnitude, subtract_frame_transforms, \
                                 combine_frame_transforms, quat_from_angle_axis, quat_mul, quat_inv, sample_uniform, saturate, \
@@ -402,7 +402,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         rot_noise_z = sample_uniform(-0.8, 0.8, (len(env_ids), ), device=self.device)
         rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
 
-        object_default_state_place[:, :3] += place_loc_noise + self.scene.env_origins[env_ids, :3]
+        object_default_state_place[:, :3] += place_loc_noise + self.scene.env_origins[env_ids, :3] + 0.02 * self.z_unit_tensor[env_ids]
         object_default_state_place[:, 3:7] = quat_mul(tcp_quat, rot_noise)
 
         self.object_place_pos_w[env_ids] = object_default_state_place[:, :7]
@@ -574,6 +574,33 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 )
         else:
             self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+
+
+        # ========== Logging ===========
+
+        if not reset:
+            self.extras["probe"] = copy.deepcopy(
+                {
+                    # phase flags
+                    "is_reach":   self.is_reach.detach(),
+                    "is_grasp":   self.is_grasp.detach(),
+                    "is_retract": self.is_retract.detach(),
+                    "is_success": self.is_success.detach(),
+
+                    # errors
+                    "approach_loc": self.approach_error[:, 0].detach(),
+                    "approach_rot": self.approach_error[:, 1].detach(),
+                    "retract_loc":  self.retract_error[:, 0].detach(),
+                    "retract_rot":  self.retract_error[:, 1].detach(),
+                    "place_loc":    self.place_error[:, 0].detach(),
+                    "place_rot":    self.place_error[:, 1].detach(),
+
+                    # weighted versions
+                    "w_approach_loc": self.weighted_approach_error[:, 0].detach(),
+                    "w_approach_rot": self.weighted_approach_error[:, 1].detach(),
+                    "w_place_loc":    self.weighted_place_error[:, 0].detach(),
+                    "w_place_rot":    self.weighted_place_error[:, 1].detach(),
+                })
             
         # ======== Visualization ==========
         self.tcp_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
