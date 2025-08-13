@@ -172,7 +172,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self._compute_intermediate_values()
         drop = torch.logical_and(self.prev_grasp, ~self.is_grasp) | torch.logical_and(self.object_pos_w[:, 2] < 0, ~self.is_grasp)
         # drop 조건은 retract시에 무효
-        in_place = (self.is_retract) & (self.place_error[:, 0] < 5e-2 * 4)
+        in_place = (self.is_retract) & (self.place_error[:, 0] < 5e-2 * 4) & (self.approach_error[:, 0] < 5e-2 * 2)
 
         drop = drop & ~in_place
 
@@ -552,7 +552,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #                                              torch.logical_and(self.place_error[env_ids, 0] < 5e-2,
         #                                                                self.place_error[env_ids, 1] < 1e-1))
         self.is_success[env_ids] = torch.logical_and(self.is_retract[env_ids], 
-                                                     torch.logical_and(self.place_error[env_ids, 0] < 1e-2,
+                                                     torch.logical_and(self.place_error[env_ids, 0] < 5e-2,
                                                                        self.place_error[env_ids, 1] < 1e-1))
         
         self.is_in_place[env_ids] = (self.is_retract[env_ids]) & (self.place_error[env_ids, 0] < 5e-2 * 4)
