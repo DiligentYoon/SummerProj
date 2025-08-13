@@ -137,6 +137,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = self.processed_actions[:, 2*self.num_active_joints : 3*self.num_active_joints]
         self.imp_controller.set_command(self.imp_commands)
 
+        # print(f"k_p : {self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints]}")
+        # print(f"zeta : {self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints]}")
+
         # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
         self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
                                                joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
@@ -560,15 +563,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.is_contact[env_ids] = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
                                                                            self.approach_error[env_ids, 0] < 5e-2 * 4),
                                                                            torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 1e-1)
-            print(f"\n")
-            print(
-                    f"Contact / Reach / Grasp / Retract / Success : "
-                    f"{self.is_contact.sum().item()} / "
-                    f"{self.is_reach.sum().item()} / "
-                    f"{self.is_grasp.sum().item()} / "
-                    f"{self.is_retract.sum().item()} / "
-                    f"{self.is_success.sum().item()}"
-                )
+            # print(f"\n")
+            # print(
+            #         f"Contact / Reach / Grasp / Retract / Success : "
+            #         f"{self.is_contact.sum().item()} / "
+            #         f"{self.is_reach.sum().item()} / "
+            #         f"{self.is_grasp.sum().item()} / "
+            #         f"{self.is_retract.sum().item()} / "
+            #         f"{self.is_success.sum().item()}"
+            #     )
         else:
             self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             

@@ -192,7 +192,7 @@ def main():
             else:
                 actions = outputs[-1].get("mean_actions", outputs[0])
             # env stepping
-            obs, _, _, _, _ = env.step(actions)
+            obs, _, _, _, info = env.step(actions)
         if args_cli.video:
             timestep += 1
             # exit the play loop after recording one video
