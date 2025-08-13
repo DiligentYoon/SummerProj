@@ -67,25 +67,21 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_retract = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-
-        # Domain Randomization Scale
-        self.noise_scale = torch.tensor(
-                            [self.cfg.reset_position_noise_x, self.cfg.reset_position_noise_y],
-                            device=self.device,)
         
-
         # metric
-        self.extras["log"] = {
-            "epi_success_rate": torch.zeros(self.num_envs, device=self.device),
-            "grasp_success_rate": torch.zeros(self.num_envs, device=self.device)
-        }
         self.success_buffer = collections.deque(maxlen=100) # 최근 100개 에피소드 결과 저장
         self.grasp_buffer = collections.deque(maxlen=100) # 최근 100개 에피소드 결과 저장
-        self.print_count = 0
 
         # Goal point & Via point marker
         self.retract_marker = VisualizationMarkers(self.cfg.retract_pos_marker_cfg)
         self.place_marker = VisualizationMarkers(self.cfg.place_pos_marker_cfg)
+
+        # Low-Pass Filter Parameter
+        self.control_dt = self.physics_dt * self.cfg.decimation
+        self.tau = 0.2
+        self.omega = 1/self.tau
+        self.prev_imp_commands = torch.zeros_like(self.imp_commands, device=self.device)
+
 
 
     def _setup_scene(self):
@@ -133,8 +129,18 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ===== Impedance Controller Parameter 세팅 =====
         self.imp_commands[:, :self.num_active_joints] = self.processed_actions[:, :self.num_active_joints] + \
                                                         self._robot.data.joint_pos[:, :self.num_active_joints]
-        self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = self.processed_actions[:, self.num_active_joints : 2*self.num_active_joints]
-        self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = self.processed_actions[:, 2*self.num_active_joints : 3*self.num_active_joints]
+
+        # 파라미터 값은 LPF Smoothing
+        prev_kp_commands = self.prev_imp_commands[:, self.num_active_joints : 2*self.num_active_joints]
+        cur_kp_commands = self.processed_actions[:, self.num_active_joints : 2*self.num_active_joints]
+        self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = (1 / (1+(self.control_dt * self.omega))) * \
+                                                                                    (prev_kp_commands + self.control_dt * self.omega * cur_kp_commands)
+        
+        prev_zeta_commands = self.prev_imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints]
+        cur_zeta_commands= self.processed_actions[:, 2*self.num_active_joints : 3*self.num_active_joints]
+        self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints] = (1 / (1+(self.control_dt * self.omega))) * \
+                                                                                    (prev_zeta_commands + self.control_dt * self.omega * cur_zeta_commands)
+        # Control Command 세팅
         self.imp_controller.set_command(self.imp_commands)
 
         # print(f"k_p : {self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints]}")
@@ -143,6 +149,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
         self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
                                                joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
+        
+
+        # ===== LPF 스무딩을 위해 prev값 업데이트 =====
+        self.prev_imp_commands = self.imp_commands.clone()
         
 
     def _apply_action(self) -> None:
@@ -478,6 +488,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
             self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_retract[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
+            self.prev_imp_commands[env_ids] = torch.zeros_like(self.imp_commands[env_ids], device=self.device)
         else:
             self.prev_weighted_approach_error[env_ids] = self.weighted_approach_error[env_ids]
             self.prev_weighted_place_error[env_ids] = self.weighted_place_error[env_ids]
