@@ -204,8 +204,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s = -torch.log(self.cfg.beta * self.prev_weighted_approach_error[:, 0] + 1)
         phi_s_rot = -torch.log(self.cfg.alpha * self.prev_weighted_approach_error[:, 1] + 1)
 
-        r_pos = gamma*phi_s_prime - phi_s 
-        r_rot = gamma*phi_s_prime_rot - phi_s_rot
+        self.r_pos = gamma*phi_s_prime - phi_s 
+        self.r_rot = gamma*phi_s_prime_rot - phi_s_rot
 
         # =========== Phase Reward : Grasping & Retract ===========
         # 1. Grasp Bonus
@@ -217,9 +217,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_retract_loc = -torch.log(self.cfg.alpha_retract * self.prev_retract_error[:, 0] + 1)
         phi_s_retract_rot = -torch.log(self.cfg.alpha_retract * self.prev_retract_error[:, 1] + 1)
 
-        r_retract_loc = torch.max(torch.zeros(1, device=self.device), 
+        self.r_retract_loc = torch.max(torch.zeros(1, device=self.device), 
                                   (gamma * phi_s_prime_retract_loc - phi_s_retract_loc))
-        r_retract_rot = torch.max(torch.zeros(1, device=self.device), 
+        self.r_retract_rot = torch.max(torch.zeros(1, device=self.device), 
                                   (gamma * phi_s_prime_retract_rot - phi_s_retract_rot))
 
         
@@ -234,9 +234,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_place_loc = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 0] + 1)
         phi_s_place_rot = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 1] + 1)
 
-        r_place_loc = torch.max(torch.zeros(1, device=self.device), 
+        self.r_place_loc = torch.max(torch.zeros(1, device=self.device), 
                                 (gamma * phi_s_prime_place_loc - phi_s_place_loc)) / (hand_lin_vel + 1)
-        r_place_rot = torch.max(torch.zeros(1, device=self.device), 
+        self.r_place_rot = torch.max(torch.zeros(1, device=self.device), 
                                 (gamma * phi_s_prime_place_rot - phi_s_place_rot))      
 
         # Success Bonus
@@ -248,26 +248,30 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         # =========== Summation =============
         reward = torch.where(self.is_retract,
-                             self.cfg.w_loc_place * r_place_loc + self.cfg.w_rot_place * r_place_rot,
+                             self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
                              torch.where(self.is_grasp,
-                                         self.cfg.w_loc_retract * r_retract_loc + self.cfg.w_rot_retract * r_retract_rot,
-                                         self.cfg.w_pos * r_pos + self.cfg.w_rot * r_rot))
+                                         self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot,
+                                         self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot))
 
         logic_reward = (self.cfg.w_grasp * r_grasp + 
                         self.cfg.w_retract * r_retract + 
                         self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
-
         reward += logic_reward
+
+        self.r_total = reward
+
+        # ========== Logging ===========
+        self.update_additional_info()
                  
 
-        self.extras["log"]["Approach_loc"] = torch.mean(r_pos)
-        self.extras["log"]["Approach_rot"] = torch.mean(r_rot)
-        self.extras["log"]["Retract_loc"] = torch.mean(r_retract_loc)
-        self.extras["log"]["Retract_rot"] = torch.mean(r_retract_rot)
-        self.extras["log"]["Place_loc"] = torch.mean(r_place_loc)
-        self.extras["log"]["Place_rot"] = torch.mean(r_place_rot)
+        # self.extras["log"]["Approach_loc"] = torch.mean(self.r_pos)
+        # self.extras["log"]["Approach_rot"] = torch.mean(self.r_rot)
+        # self.extras["log"]["Retract_loc"] = torch.mean(self.r_retract_loc)
+        # self.extras["log"]["Retract_rot"] = torch.mean(self.r_retract_rot)
+        # self.extras["log"]["Place_loc"] = torch.mean(self.r_place_loc)
+        # self.extras["log"]["Place_rot"] = torch.mean(self.r_place_rot)
 
 
         return reward
@@ -312,13 +316,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         current_goal_info_obj = torch.where(self.is_retract.unsqueeze(-1),
                                             place_pos_obj,
                                             retract_pos_obj)
-
-        
-        if len(self.success_buffer) > 0:
-            self.extras["log"]["epi_success_rate"] = torch.tensor(sum(self.success_buffer) / len(self.success_buffer), device=self.device)
-
-        if len(self.grasp_buffer) > 0:
-            self.extras["log"]["grasp_success_rate"] = torch.tensor(sum(self.grasp_buffer) / len(self.grasp_buffer), device=self.device)
 
         obs = torch.cat(
             (   
@@ -576,11 +573,51 @@ class FrankaGraspEnv(FrankaBaseEnv):
                     f"{self.is_retract.sum().item()} / "
                     f"{self.is_success.sum().item()}"
                 )
+
         else:
             self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            
+        # ======== Visualization ==========
+        self.tcp_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
+        self.retract_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
+        self.place_marker.visualize(self.object_place_pos_w[:, :3], self.object_place_pos_w[:, 3:7])
 
 
-        # ========== Logging ===========
+
+    def update_additional_info(self, reset: bool = False):
+
+        self.extras["log"] = copy.deepcopy(
+            {
+                # Episode Info
+                "epi_success_rate": torch.tensor(sum(self.success_buffer) / max(1, len(self.success_buffer)), device=self.device),
+                "grasp_success_rate": torch.tensor(sum(self.grasp_buffer) / max(1, len(self.grasp_buffer)), device=self.device),
+                
+                # Rewards Info
+                "Approach_loc": torch.mean(self.r_pos),
+                "Approach_rot":torch.mean(self.r_rot),
+                "Retract_loc": torch.mean(self.r_retract_loc),
+                "Retract_rot": torch.mean(self.r_retract_rot),
+                "Place_loc": torch.mean(self.r_place_loc),
+                "Place_rot": torch.mean(self.r_place_rot),
+            }
+        )
+
+        self.extras["robot"] = copy.deepcopy(
+            {
+                # control Info
+                "impedance_desired_joint_pos": self.imp_commands[:, :self.num_active_joints].detach(),
+                "impedance_stiffness" : self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints].detach(),
+                "impedance_damping": self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints].detach(),
+                # robot info
+                "joint_pos": self.robot_joint_pos.detach(),
+                "joint_vel" : self.robot_joint_vel.detach(),
+                "hand_vel" : self._robot.data.body_lin_vel_w[:, self.hand_link_idx, :].detach(),
+                # reward Info
+                "total_reward": torch.mean(self.r_total).unsqueeze(-1).detach()
+
+            }
+        )
+
 
         if not reset:
             self.extras["probe"] = copy.deepcopy(
@@ -590,7 +627,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
                     "is_grasp":   self.is_grasp.detach(),
                     "is_retract": self.is_retract.detach(),
                     "is_success": self.is_success.detach(),
-
                     # errors
                     "approach_loc": self.approach_error[:, 0].detach(),
                     "approach_rot": self.approach_error[:, 1].detach(),
@@ -598,21 +634,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
                     "retract_rot":  self.retract_error[:, 1].detach(),
                     "place_loc":    self.place_error[:, 0].detach(),
                     "place_rot":    self.place_error[:, 1].detach(),
-
                     # weighted versions
                     "w_approach_loc": self.weighted_approach_error[:, 0].detach(),
                     "w_approach_rot": self.weighted_approach_error[:, 1].detach(),
                     "w_place_loc":    self.weighted_place_error[:, 0].detach(),
                     "w_place_rot":    self.weighted_place_error[:, 1].detach(),
                 })
-            
-        # ======== Visualization ==========
-        self.tcp_marker.visualize(self.object_target_pos_w[:, :3], self.object_target_pos_w[:, 3:7])
-        self.retract_marker.visualize(self.object_pos_w[:, :3], self.object_pos_w[:, 3:7])
-        self.place_marker.visualize(self.object_place_pos_w[:, :3], self.object_place_pos_w[:, 3:7])
-    
-
-
 
 
     # def compute_frame_jacobian(self, parent_rot_b, jacobian_w: torch.Tensor) -> torch.Tensor:

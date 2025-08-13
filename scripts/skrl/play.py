@@ -65,6 +65,8 @@ import os
 import time
 import torch
 import copy
+import numpy as np
+from datetime import datetime
 
 import skrl
 from packaging import version
@@ -86,7 +88,6 @@ elif args_cli.ml_framework.startswith("jax"):
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 
 import isaaclab_tasks  # noqa: F401
@@ -95,8 +96,24 @@ from isaaclab_tasks.utils import get_checkpoint_path, load_cfg_from_registry, pa
 import SummerProj.tasks  # noqa: F401
 from runner import AISLRunner
 
+from logger import PerEpisodeExcelLogger
+
+
 # config shortcuts
 algorithm = args_cli.algorithm.lower()
+
+def _row_flat(prefix, x):
+    """1D로 펴서 {f"{prefix}_{i}": val} dict로 반환"""
+    if hasattr(x, "detach"):
+        x = x.detach().cpu().view(-1).tolist()
+    elif isinstance(x, np.ndarray):
+        x = x.reshape(-1).tolist()
+    elif isinstance(x, (list, tuple)):
+        x = list(x)
+    else:
+        x = [float(x)]
+    return {f"{prefix}_{i}": float(v) for i, v in enumerate(x)}
+
 
 
 def main():
@@ -205,6 +222,12 @@ def main():
     APPR, GRASP, RETRACT, PLACE = 0, 1, 2, 3
 
     timestep = 0
+    metric_path = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_metrics.xlsx"
+
+    logger = PerEpisodeExcelLogger(path=os.path.join(log_dir, metric_path))
+    num_envs = env.num_envs  # 또는 env.num_envs
+    ep_id    = np.zeros(num_envs, dtype=np.int64)
+    step_in_ep = np.zeros(num_envs, dtype=np.int64)
     while simulation_app.is_running():
         start_time = time.time()
 
@@ -229,9 +252,12 @@ def main():
             # (배치 [N] 환경 기준, 텐서 연산)
             A_t = reward + gamma * (1.0 - done.float()) * V_tp1 - V_t   # shape [N]
 
-            # 6) Phase/오류 정보 가져오기 (t와 t+1 비교 위해)
+            # 6) 정보 가져오기
             probe_tp1 = copy.deepcopy(info["probe"])
             assert probe_tp1 is not None, "env.extras['probe']가 info로 전달되도록 env를 보강하세요."
+            robot_info = info["robot"]
+            assert robot_info is not None, "env.extras['robot']가 info로 전달되도록 env를 보강하세요."
+
 
             # phase id 인코딩: Approach=0, Grasp=1, Retract=2, Place=3
             # (Place는 is_success 전/후 모두 3으로 취급)
@@ -313,6 +339,33 @@ def main():
                 A_S_sum_p += A_t[mask_S_p].sum().item()
                 A_S_cnt_p += mask_S_p.sum().item()
 
+
+            # --- 각 env i에 대해 한 줄씩 로깅 ---
+            for i in range(num_envs):
+                row = {}
+
+                # --- t+1 시점 ---
+                row.update(_row_flat("des_q",   robot_info["impedance_desired_joint_pos"][i]))
+                row.update(_row_flat("kp",      robot_info["impedance_stiffness"][i]))
+                row.update(_row_flat("zeta",    robot_info["impedance_damping"][i]))
+                row.update(_row_flat("q",       robot_info["joint_pos"][i]))
+                row.update(_row_flat("dq",      robot_info["joint_vel"][i]))
+                row.update(_row_flat("tcpvel",  robot_info["hand_vel"][i]))
+                row.update(_row_flat("rewards", robot_info["total_reward"][i]))
+
+                # 로깅
+                logger.log_step(env_id=i, ep_id=int(ep_id[i]), step_idx=int(step_in_ep[i]), row_dict=row)
+
+                # done이면 시트로 Flush
+                if bool(done[i]):
+                    logger.end_episode(env_id=i, ep_id=int(ep_id[i]))
+                    ep_id[i] += 1
+                    step_in_ep[i] = 0
+                else:
+                    step_in_ep[i] += 1
+
+
+
             # Next Loops
             prev_probe = probe_tp1
             prev_phase_id = phase_tp1
@@ -333,9 +386,6 @@ def main():
             A_T_mean_p = A_T_sum_p / max(1, A_T_cnt_p)
             A_S_mean_p = A_S_sum_p / max(1, A_S_cnt_p)
             print(f"[Place boundary] E[A|transition]={A_T_mean_p:.4f}  E[A|stay]={A_S_mean_p:.4f}  Δ={A_T_mean_p - A_S_mean_p:.4f}")
-
-
-
 
 
         # 비디오/리얼타임 처리
@@ -366,6 +416,8 @@ def main():
 
     # close the simulator
     env.close()
+    logger.close()
+    print("Excel 저장 완료:", logger.path)
 
     # # simulate environment
     # while simulation_app.is_running():
