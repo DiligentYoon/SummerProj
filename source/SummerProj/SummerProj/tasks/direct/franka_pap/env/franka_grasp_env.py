@@ -563,15 +563,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.is_contact[env_ids] = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
                                                                            self.approach_error[env_ids, 0] < 5e-2 * 4),
                                                                            torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 1e-1)
-            # print(f"\n")
-            # print(
-            #         f"Contact / Reach / Grasp / Retract / Success : "
-            #         f"{self.is_contact.sum().item()} / "
-            #         f"{self.is_reach.sum().item()} / "
-            #         f"{self.is_grasp.sum().item()} / "
-            #         f"{self.is_retract.sum().item()} / "
-            #         f"{self.is_success.sum().item()}"
-            #     )
+            print(f"\n")
+            print(
+                    f"Contact / Reach / Grasp / Retract / Success : "
+                    f"{self.is_contact.sum().item()} / "
+                    f"{self.is_reach.sum().item()} / "
+                    f"{self.is_grasp.sum().item()} / "
+                    f"{self.is_retract.sum().item()} / "
+                    f"{self.is_success.sum().item()}"
+                )
         else:
             self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             
