@@ -228,13 +228,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
         r_retract = self.is_retract.float()
 
         # Place Error Bonus
+        hand_lin_vel = torch.norm(self._robot.data.body_lin_vel_w[:, self.hand_link_idx, :3], dim=1)
         phi_s_prime_place_loc = -torch.log(self.cfg.alpha_place * self.weighted_place_error[:, 0] + 1)
         phi_s_prime_place_rot = -torch.log(self.cfg.alpha_place * self.weighted_place_error[:, 1] + 1)
         phi_s_place_loc = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 0] + 1)
         phi_s_place_rot = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 1] + 1)
 
         r_place_loc = torch.max(torch.zeros(1, device=self.device), 
-                                (gamma * phi_s_prime_place_loc - phi_s_place_loc))
+                                (gamma * phi_s_prime_place_loc - phi_s_place_loc)) / (hand_lin_vel + 1)
         r_place_rot = torch.max(torch.zeros(1, device=self.device), 
                                 (gamma * phi_s_prime_place_rot - phi_s_place_rot))      
 
