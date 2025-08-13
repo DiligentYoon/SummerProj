@@ -25,7 +25,7 @@ parser.add_argument(
 )
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default="Franka-Grasp-Direct-v0", help="Name of the task.")
-parser.add_argument("--checkpoint", type=str, default="C:/SummerProj/logs/skrl/franka_approach/2025-08-13_13-01-28_ppo_torch/checkpoints/agent_32000.pt", help="Path to model checkpoint.")
+parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
 parser.add_argument(
     "--use_pretrained_checkpoint",
     action="store_true",
