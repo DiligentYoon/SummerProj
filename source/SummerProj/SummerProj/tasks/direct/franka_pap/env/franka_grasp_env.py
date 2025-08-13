@@ -402,7 +402,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         rot_noise_z = sample_uniform(-0.8, 0.8, (len(env_ids), ), device=self.device)
         rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
 
-        object_default_state_place[:, :3] += place_loc_noise + self.scene.env_origins[env_ids, :3]
+        object_default_state_place[:, :3] += place_loc_noise + self.scene.env_origins[env_ids, :3] + 0.02 * self.z_unit_tensor[env_ids]
         object_default_state_place[:, 3:7] = quat_mul(tcp_quat, rot_noise)
 
         self.object_place_pos_w[env_ids] = object_default_state_place[:, :7]
@@ -548,8 +548,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                                                         self.retract_error[env_ids, 1] < 1e-1)),
                                                     self.prev_retract[env_ids])
 
+        # self.is_success[env_ids] = torch.logical_and(self.is_retract[env_ids], 
+        #                                              torch.logical_and(self.place_error[env_ids, 0] < 5e-2,
+        #                                                                self.place_error[env_ids, 1] < 1e-1))
         self.is_success[env_ids] = torch.logical_and(self.is_retract[env_ids], 
-                                                     torch.logical_and(self.place_error[env_ids, 0] < 5e-2,
+                                                     torch.logical_and(self.place_error[env_ids, 0] < 1e-2,
                                                                        self.place_error[env_ids, 1] < 1e-1))
         
         self.is_in_place[env_ids] = (self.is_retract[env_ids]) & (self.place_error[env_ids, 0] < 5e-2 * 4)
