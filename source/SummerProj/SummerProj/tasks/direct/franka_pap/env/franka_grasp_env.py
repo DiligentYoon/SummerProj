@@ -235,7 +235,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_place_rot = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 1] + 1)
 
         r_place_loc = torch.max(torch.zeros(1, device=self.device), 
-                                (gamma * phi_s_prime_place_loc - phi_s_place_loc)) / (hand_lin_vel + 1)
+                                (gamma * phi_s_prime_place_loc - phi_s_place_loc)) / (hand_lin_vel*20 + 1)
         r_place_rot = torch.max(torch.zeros(1, device=self.device), 
                                 (gamma * phi_s_prime_place_rot - phi_s_place_rot))      
 
@@ -527,8 +527,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.place_error[env_ids, 1] = quat_error_magnitude(self.object_pos_b[env_ids, 3:7],
                                                             self.object_place_pos_b[env_ids, 3:7])
 
-        self.weighted_place_error[env_ids, 0] = torch.sqrt(self.cfg.wx * torch.square(place_error_xyz[:, 0]) +
-                                                           self.cfg.wy * torch.square(place_error_xyz[:, 1]) + 
+        self.weighted_place_error[env_ids, 0] = torch.sqrt(self.cfg.wx*2 * torch.square(place_error_xyz[:, 0]) +
+                                                           self.cfg.wy*2 * torch.square(place_error_xyz[:, 1]) + 
                                                            self.cfg.wz * torch.square(place_error_xyz[:, 2])).squeeze(-1)
 
         self.weighted_place_error[env_ids, 1] = self.place_error[env_ids, 1]
