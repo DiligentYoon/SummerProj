@@ -78,7 +78,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # Low-Pass Filter Parameter
         self.control_dt = self.physics_dt * self.cfg.decimation
-        self.tau = 0.2
+        self.tau = 0.25
         self.omega = 1/self.tau
         self.prev_imp_commands = torch.zeros_like(self.imp_commands, device=self.device)
 
@@ -184,9 +184,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # drop 조건은 retract시에 무효
         in_place = (self.is_retract) & (self.place_error[:, 0] < 5e-2 * 4) & (self.approach_error[:, 0] < 5e-2 * 2)
 
+        collision = (self.is_retract) & (self.object_pos_b[:, 2] < self.object_place_pos_b[0, 2])
+
         drop = drop & ~in_place
 
-        terminated = self.is_success | drop | self.is_contact
+        terminated = self.is_success | drop | self.is_contact | collision
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
         done = terminated | truncated
@@ -535,9 +537,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.place_error[env_ids, 1] = quat_error_magnitude(self.object_pos_b[env_ids, 3:7],
                                                             self.object_place_pos_b[env_ids, 3:7])
 
-        self.weighted_place_error[env_ids, 0] = torch.sqrt(self.cfg.wx*2 * torch.square(place_error_xyz[:, 0]) +
-                                                           self.cfg.wy*2 * torch.square(place_error_xyz[:, 1]) + 
-                                                           self.cfg.wz * torch.square(place_error_xyz[:, 2])).squeeze(-1)
+        self.weighted_place_error[env_ids, 0] = torch.sqrt(self.cfg.wx * torch.square(place_error_xyz[:, 0]) +
+                                                           self.cfg.wy * torch.square(place_error_xyz[:, 1]) + 
+                                                           self.cfg.wz*0.25 * torch.square(place_error_xyz[:, 2])).squeeze(-1)
 
         self.weighted_place_error[env_ids, 1] = self.place_error[env_ids, 1]
 
