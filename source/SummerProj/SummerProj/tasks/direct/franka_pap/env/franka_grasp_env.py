@@ -434,7 +434,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ================ Curriculum =================
         success_rate = sum(self.success_buffer) / max(1, len(self.success_buffer))
-        # self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * success_rate)
+        self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * success_rate)
 
         
         # ============= State 업데이트 ===============
