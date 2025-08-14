@@ -422,7 +422,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         rot_noise_z = sample_uniform(-0.8, 0.8, (len(env_ids), ), device=self.device)
         rot_noise = quat_from_angle_axis(rot_noise_z, self.z_unit_tensor[env_ids])
 
-        object_default_state_place[:, :3] += place_loc_noise + self.scene.env_origins[env_ids, :3] + 0.01 * self.z_unit_tensor[env_ids]
+        object_default_state_place[:, :3] += place_loc_noise + self.scene.env_origins[env_ids, :3] + 0.0 * self.z_unit_tensor[env_ids]
         object_default_state_place[:, 3:7] = quat_mul(tcp_quat, rot_noise)
 
         self.object_place_pos_w[env_ids] = object_default_state_place[:, :7]
@@ -434,7 +434,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ================ Curriculum =================
         success_rate = sum(self.success_buffer) / max(1, len(self.success_buffer))
-        self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * success_rate)
+        # self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * success_rate)
 
         
         # ============= State 업데이트 ===============
