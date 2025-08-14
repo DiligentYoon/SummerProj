@@ -136,7 +136,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
         impedance_mode="variable",
         stiffness=300.0,
         damping_ratio=0.5,
-        stiffness_limits=(30, 150),
+        stiffness_limits=(30, 300),
         damping_ratio_limits=(0, 1),
         inertial_compensation=True,
         gravity_compensation=True,)

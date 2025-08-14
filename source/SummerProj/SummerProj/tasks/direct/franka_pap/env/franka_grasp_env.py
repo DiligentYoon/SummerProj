@@ -78,7 +78,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # Low-Pass Filter Parameter
         self.control_dt = self.physics_dt * self.cfg.decimation
-        self.tau = 0.25
+        self.tau = 0.1
         self.omega = 1/self.tau
         self.prev_imp_commands = torch.zeros_like(self.imp_commands, device=self.device)
 
@@ -126,11 +126,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         self.processed_actions[:, 21] = torch.where(self.actions[:, 21] > 0, 0.04, 0.0)
         
-        # ===== Impedance Controller Parameter 세팅 =====
-        self.imp_commands[:, :self.num_active_joints] = self.processed_actions[:, :self.num_active_joints] + \
-                                                        self._robot.data.joint_pos[:, :self.num_active_joints]
+        # ===== Impedance Controller Parameter 세팅 with LPF Smoothing =====
+        prev_joint_commands = self.prev_imp_commands[:, :self.num_active_joints]
+        cur_joint_commands = self.processed_actions[:, :self.num_active_joints] + self._robot.data.joint_pos[:, :self.num_active_joints]
+        self.imp_commands[:, :self.num_active_joints] = (1 / (1+(self.control_dt * self.omega))) * \
+                                                        (prev_joint_commands + self.control_dt * self.omega * cur_joint_commands)
+        # self.imp_commands[:, :self.num_active_joints] = self.processed_actions[:, :self.num_active_joints] + \
+        #                                                 self._robot.data.joint_pos[:, :self.num_active_joints]
 
-        # 파라미터 값은 LPF Smoothing
         prev_kp_commands = self.prev_imp_commands[:, self.num_active_joints : 2*self.num_active_joints]
         cur_kp_commands = self.processed_actions[:, self.num_active_joints : 2*self.num_active_joints]
         self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints] = (1 / (1+(self.control_dt * self.omega))) * \
