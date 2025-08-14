@@ -200,8 +200,8 @@ def main():
     gamma = 0.99
     eps_d_place = 0.05   # 거리 경계 (원하는 값으로)
     eps_a_place = 0.10   # 각도 경계 (라디안 기준)
-    eps_d_retract = 0.05   # 거리 경계 (원하는 값으로)
-    eps_a_retract = 0.10   # 각도 경계 (라디안 기준)
+    eps_d_lift = 0.05   # 거리 경계 (원하는 값으로)
+    eps_a_lift = 0.10   # 각도 경계 (라디안 기준)
     eps_d_approach = 0.05   # 거리 경계 (원하는 값으로)
     eps_a_approach = 0.10   # 각도 경계 (라디안 기준)
 
@@ -264,9 +264,9 @@ def main():
             def encode_phase(p) ->torch.Tensor:
                 # 텐서 bool -> long
                 is_g = p["is_grasp"].long()
-                is_r = p["is_retract"].long()
+                is_r = p["is_lift"].long()
                 is_s = p["is_success"].long()
-                # 우선순위: success>retract>grasp>approach
+                # 우선순위: success>lift>grasp>approach
                 return torch.where(is_s==1, torch.full_like(is_g, 3),
                     torch.where(is_r==1, torch.full_like(is_g, 2),
                     torch.where(is_g==1, torch.full_like(is_g, 1),
@@ -290,7 +290,7 @@ def main():
 
             # 7) 경계 근처(t 기준)
             near_grasp   = (probe_t["approach_loc"] <= eps_d_approach*2) & (probe_t["approach_rot"] <= eps_a_approach*2)
-            near_retract = (probe_t["retract_loc"]  <= eps_d_retract*2)  & (probe_t["retract_rot"]  <= eps_a_retract*2)
+            near_lift = (probe_t["lift_loc"]  <= eps_d_lift*2)  & (probe_t["lift_rot"]  <= eps_a_lift*2)
             near_place   = (probe_t["place_loc"]    <= eps_d_place*2)    & (probe_t["place_rot"]    <= eps_a_place*2)
 
             # 8) 전이/잔류 마스크 (방향별로 분해)
@@ -298,13 +298,13 @@ def main():
             back_from_g   = (phase_t == GRASP)   & (phase_tp1 == APPR)       # GRASP -> APPR (역방향)
             stay_appr     = (phase_t == APPR)    & (phase_tp1 == APPR)
 
-            to_retract    = (phase_t == GRASP)   & (phase_tp1 == RETRACT)    # GRASP -> RETRACT (정방향)
+            to_lift    = (phase_t == GRASP)   & (phase_tp1 == RETRACT)    # GRASP -> RETRACT (정방향)
             back_from_r   = (phase_t == RETRACT) & (phase_tp1 == GRASP)      # RETRACT -> GRASP (역방향)
             stay_grasp    = (phase_t == GRASP)   & (phase_tp1 == GRASP)
 
             to_place      = (phase_t == RETRACT) & (phase_tp1 == PLACE)      # RETRACT -> PLACE (정방향)
             back_from_p   = (phase_t == PLACE)   & (phase_tp1 == RETRACT)    # PLACE -> RETRACT (역방향)
-            stay_retract  = (phase_t == RETRACT) & (phase_tp1 == RETRACT)
+            stay_lift  = (phase_t == RETRACT) & (phase_tp1 == RETRACT)
 
             print(f"Phase : {phase_tp1}")
 
@@ -320,8 +320,8 @@ def main():
                 A_S_cnt_g += mask_S_g.sum().item()
 
             # Retract 경계: GRASP 근처에서 GRASP에 머무름 vs RETRACT로 전이
-            mask_T_r = near_retract & to_retract
-            mask_S_r = near_retract & stay_grasp
+            mask_T_r = near_lift & to_lift
+            mask_S_r = near_lift & stay_grasp
             if mask_T_r.any():
                 A_T_sum_r += A_t[mask_T_r].sum().item()
                 A_T_cnt_r += mask_T_r.sum().item()
@@ -331,7 +331,7 @@ def main():
 
             # Place 경계: RETRACT 근처에서 RETRACT에 머무름 vs PLACE로 전이
             mask_T_p = near_place & to_place
-            mask_S_p = near_place & stay_retract
+            mask_S_p = near_place & stay_lift
             if mask_T_p.any():
                 A_T_sum_p += A_t[mask_T_p].sum().item()
                 A_T_cnt_p += mask_T_p.sum().item()

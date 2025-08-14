@@ -58,7 +58,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
         )
     
     # marker
-    retract_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+    lift_pos_marker_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
         prim_path="Visuals/goal_marker",
         markers={
         "frame": sim_utils.UsdFileCfg(
@@ -78,19 +78,26 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
         }
     )
     
+    # threshold
+    loc_th = 5e-2
+    rot_th = 1e-1
+
+    place_loc_th = 1e-2
+    place_rot_th = 1e-1
+
 
     # reward hyperparameter
     alpha, beta = 3.0, 3.0
-    alpha_retract, beta_retract = 1.5, 1.5
+    alpha_lift, beta_lift = 1.5, 1.5
     alpha_place, beta_place = 0.5, 0.5
 
     w_pos = 20.0
     w_rot = 10.0
 
-    # w_loc_retract = 45.0
-    # w_rot_retract = 10.0
-    w_loc_retract = 20.0
-    w_rot_retract = 10.0
+    # w_loc_lift = 45.0
+    # w_rot_lift = 10.0
+    w_loc_lift = 20.0
+    w_rot_lift = 10.0
 
     # w_loc_place = 50.0
     # w_rot_place = 25.0
@@ -98,9 +105,10 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     w_rot_place = 10.0
 
     # w_grasp = 1.5
-    # w_retract = 4.5
+    # w_lift = 4.5
     w_grasp = 6.0
-    w_retract = 6.0
+    w_lift = 6.0
+    w_place = 6.0
     w_success = 2000.0
 
     wx = 4.0
@@ -111,3 +119,8 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     w_contact = 0.01
     # w_ps = 2.0
     w_ps = 1.0
+
+    # curriculum learning
+    place_loc_th_max = 5e-2
+    place_loc_th_min = 1e-2
+    decay_ratio = 2.5
