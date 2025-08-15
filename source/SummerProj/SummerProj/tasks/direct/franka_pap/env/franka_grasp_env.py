@@ -34,6 +34,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.imp_commands = torch.zeros((self.num_envs, self.imp_controller.num_actions), device=self.device)
 
         # Goal Pose
+        self.final_goal_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
+        self.final_goal_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_place_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_place_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_lift_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
@@ -432,6 +434,17 @@ class FrankaGraspEnv(FrankaBaseEnv):
         ), dim=1)
 
 
+        # ================ Retract Point 리셋 ==================
+        final_loc_noise = self._object.data.default_root_state[env_ids, :3] + self.scene.env_origins[env_ids, :3]
+        final_loc_noise[:, 2] = 0.5
+        final_rot_noise = quat_from_matrix(self.tcp_unit_tensor[env_ids])
+        self.final_goal_pos_w[env_ids] = torch.cat([final_loc_noise, final_rot_noise], dim=1)
+        self.final_goal_pos_b[env_ids] = torch.cat(subtract_frame_transforms(
+            self._robot.data.root_state_w[env_ids, :3], self._robot.data.root_state_w[env_ids, 3:7],
+            self.final_goal_pos_w[env_ids, :3], self.final_goal_pos_w[env_ids, 3:7]
+        ), dim=1)
+
+
         # ================ Curriculum =================
         success_rate = sum(self.success_buffer) / max(1, len(self.success_buffer))
         # self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * success_rate)
@@ -562,6 +575,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ============ Phase Signal 업데이트 ============
         self.update_phase_signal(env_ids, reset)
+        self.update_end_condition(env_ids, reset)
             
         # ======== Visualization ==========
         self.tcp_marker.visualize(self.object_lift_pos_w[:, :3], self.object_lift_pos_w[:, 3:7])
@@ -599,7 +613,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # lift에서 place zone인 경우, grasp 조건 무효
         self.is_grasp[env_ids] = (self.is_grasp[env_ids]) | (self.is_in_place[env_ids])
 
-        
+
+    def update_end_condition(self, env_ids, reset):
         if not reset:
             self.is_contact[env_ids] = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
                                                                            self.approach_error[env_ids, 0] < self.cfg.loc_th * 4),
