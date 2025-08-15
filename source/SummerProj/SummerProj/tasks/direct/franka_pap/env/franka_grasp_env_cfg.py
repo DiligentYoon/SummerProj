@@ -124,6 +124,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
 
     w_penalty = 0.05
     w_contact = 0.01
+    w_gripper = 25.0
     # w_ps = 2.0
     w_ps = 1.0
 
