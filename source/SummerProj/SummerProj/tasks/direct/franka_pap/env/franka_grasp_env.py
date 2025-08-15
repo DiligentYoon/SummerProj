@@ -73,7 +73,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
 
-        self.steel_lift = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.still_lift = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.drop = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.collision = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
@@ -84,8 +84,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         # metric
         self.place_buffer = collections.deque(maxlen=100)
-        self.success_buffer = collections.deque(maxlen=100) # 최근 100개 에피소드 결과 저장
-        self.grasp_buffer = collections.deque(maxlen=100) # 최근 100개 에피소드 결과 저장
+        self.lift_buffer = collections.deque(maxlen=100)
+        self.success_buffer = collections.deque(maxlen=100)
+        self.grasp_buffer = collections.deque(maxlen=100)
+
+        self.still_lift_buffer = collections.deque(maxlen=100) 
 
         # Goal point & Via point marker
         self.lift_marker = VisualizationMarkers(self.cfg.lift_pos_marker_cfg)
@@ -202,11 +205,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # final_drop = self.drop & ~self.is_in_place & ~self.is_place
         final_drop = self.drop & ~self.is_in_place & ~self.is_place
 
-        terminated = self.is_success | self.is_contact | self.collision | self.steel_lift | final_drop
+        if self.check_collision:
+            terminated = self.is_success | self.is_contact | self.collision | self.still_lift | final_drop
+        else:
+            terminated = self.is_success | self.is_contact | self.still_lift | final_drop
+
         print(f"collision / drop / still lift : "
               f"{self.collision.float().sum().item()} / "  
               f"{final_drop.float().sum().item()} / "
-              f"{self.steel_lift.float().sum().item()}")
+              f"{self.still_lift.float().sum().item()}")
         
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
@@ -223,9 +230,19 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 self.is_place.index_select(0, done_ids).float().detach().cpu().tolist()
             )
 
+            self.lift_buffer.extend(
+                self.is_lift.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+
             self.grasp_buffer.extend(
                 self.is_grasp.index_select(0, done_ids).float().detach().cpu().tolist()
             )
+
+            self.still_lift_buffer.extend(
+                self.still_lift.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+
+            
 
         return terminated, truncated
         
@@ -261,6 +278,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         # ========== Phase Reward : Place ===========
         # Lift Bonus
+        # r_lift = (self.is_lift & ~self.prev_lift).float()
         r_lift = self.is_lift.float()
 
         # Place Error Bonus
@@ -280,7 +298,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ========= Phase Reward : Retract ==========
         # Place Bonus
-        r_first_place = self.is_first_place.float()
+        # r_place = self.is_first_place.float()
         r_place = self.is_place.float()
 
         # Retract Error Bonus
@@ -323,7 +341,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         logic_reward = (self.cfg.w_grasp * r_grasp + 
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
-                        self.cfg.w_success * r_first_place + 
                         self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
@@ -422,6 +439,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                             torch.where(self.is_lift.unsqueeze(-1),
                                                         place_pos_obj,
                                                         lift_pos_obj))
+        
+
+        current_phase = torch.zeros(self.num_envs, device=self.device)
+        current_phase = torch.where(self.is_grasp, 1.0, current_phase)
+        current_phase = torch.where(self.is_lift,  2.0, current_phase)
+        current_phase = torch.where(self.is_place, 3.0, current_phase)
+        current_phase /= 3.0
 
         obs = torch.cat(
             (   
@@ -438,8 +462,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 # Goal Info w.r.t Obj frame (7)
                 current_goal_info_obj,
                 # Current Phase Info (1)
-                self.is_grasp.unsqueeze(-1),
-                self.is_lift.unsqueeze(-1)
+                current_phase.unsqueeze(-1)
+                # self.is_grasp.unsqueeze(-1),
+                # self.is_lift.unsqueeze(-1),
+                # self.is_place.unsqueeze(-1),
             ), dim=1
         )
 
@@ -530,8 +556,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
 
         # ================ Curriculum =================
-        success_rate = sum(self.place_buffer) / max(1, len(self.place_buffer))
-        self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * success_rate)
+        place_success_rate = sum(self.place_buffer) / max(1, len(self.place_buffer))
+        self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * place_success_rate)
+
+        if place_success_rate > 0.5:
+            self.check_collision = True
+        else:
+            self.check_collision = False
+
 
         
         # ============= State 업데이트 ===============
@@ -722,7 +754,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                      torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
                                                                        self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
         # place에서 place zone인 경우, grasp 조건 무효
-        self.is_grasp[env_ids] = (self.is_grasp[env_ids]) | (self.is_in_place[env_ids]) | self.is_place[env_ids]
+        self.is_grasp[env_ids] = (self.is_grasp[env_ids]) | (self.is_in_place[env_ids]) | (self.is_place[env_ids])
 
 
     def update_end_condition(self, env_ids, reset):
@@ -746,8 +778,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
 
 
-        self.steel_lift[env_ids] = (self.is_place[env_ids]) & (self.object_pos_b[env_ids, 2] > self.object_place_pos_b[env_ids, 2] * 2)
-        self.collision[env_ids] = (self.is_lift[env_ids]) & (self.object_pos_b[env_ids, 2] < self.object_place_pos_b[0, 2]) & (~self.is_place[env_ids])
+        self.still_lift[env_ids] = (self.is_place[env_ids]) & (self.object_pos_b[env_ids, 2] > self.object_place_pos_b[env_ids, 2] * 2)
+        self.collision[env_ids] = (self.is_lift[env_ids]) & (self.object_pos_b[env_ids, 2] < self.object_place_pos_b[env_ids, 2]) & (~self.is_place[env_ids])
         self.drop[env_ids] = torch.logical_and(self.prev_grasp[env_ids], ~self.is_grasp[env_ids]) | torch.logical_and(self.object_pos_w[env_ids, 2] < 0, ~self.is_grasp[env_ids])
 
 
@@ -758,9 +790,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.extras["log"] = copy.deepcopy(
             {
                 # Episode Info
-                "epi_success_rate": torch.tensor(sum(self.success_buffer) / max(1, len(self.success_buffer)), device=self.device),
                 "grasp_success_rate": torch.tensor(sum(self.grasp_buffer) / max(1, len(self.grasp_buffer)), device=self.device),
+                "lift_success_rate": torch.tensor(sum(self.lift_buffer) / max(1, len(self.lift_buffer)), device=self.device),
                 "place_success_rate": torch.tensor(sum(self.place_buffer) / max(1, len(self.place_buffer)), device=self.device),
+                "epi_success_rate": torch.tensor(sum(self.success_buffer) / max(1, len(self.success_buffer)), device=self.device),
+                "still_lift_rate": torch.tensor(sum(self.still_lift_buffer) / max(1, len(self.still_lift_buffer)), device=self.device),
                 "place_threshold": torch.tensor(self.cfg.place_loc_th, device=self.device),
                 
                 # Rewards Info
