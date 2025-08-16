@@ -115,7 +115,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # w_lift = 4.5
     w_grasp = 6.0
     w_lift = 6.0
-    w_place = 12.0
+    w_place = 6.0
     w_success = 2000.0
 
     wx = 4.0

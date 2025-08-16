@@ -311,7 +311,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         
         self.r_retract_loc = torch.max(torch.zeros(1, device=self.device),
-                               (gamma * phi_s_prime_retract_loc - phi_s_retract_loc))
+                               (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)) / (hand_lin_vel*20 + 1)
         self.r_retract_rot = torch.max(torch.zeros(1, device=self.device),
                                     (gamma * phi_s_prime_retract_rot - phi_s_retract_rot))
         
@@ -347,7 +347,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
                         self.cfg.w_success * 0.5 * r_first_place + 
-                        self.cfg.w_success * 1.5 * r_success -
+                        self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
         
@@ -563,7 +563,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ================ Curriculum =================
         place_success_rate = sum(self.place_buffer) / max(1, len(self.place_buffer))
-        self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * place_success_rate)
+        # self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * place_success_rate)
 
         if place_success_rate > 0.5:
             self.check_collision = True
@@ -722,9 +722,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
 
         retract_error_xyz = torch.abs(self.robot_grasp_pos_b[env_ids, :3] - self.final_goal_pos_b[env_ids, :3])
-        self.weighted_retract_error[env_ids, 0] = torch.sqrt(self.cfg.wz * 0.25 * torch.square(retract_error_xyz[:, 0]) +
-                                                             self.cfg.wz * 0.25 * torch.square(retract_error_xyz[:, 1]) + 
-                                                             self.cfg.wx * torch.square(retract_error_xyz[:, 2])).squeeze(-1)
+        self.weighted_retract_error[env_ids, 0] = torch.sqrt(torch.square(retract_error_xyz[:, 0]) +
+                                                             torch.square(retract_error_xyz[:, 1]) + 
+                                                             torch.square(retract_error_xyz[:, 2])).squeeze(-1)
 
         self.weighted_retract_error[env_ids, 1] = self.retract_error[env_ids, 1]
 
