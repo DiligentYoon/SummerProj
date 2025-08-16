@@ -131,4 +131,4 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # curriculum learning
     place_loc_th_max = 5e-2
     place_loc_th_min = 1e-2
-    decay_ratio = 2.5
+    decay_ratio = 2.0

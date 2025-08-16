@@ -563,7 +563,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ================ Curriculum =================
         place_success_rate = sum(self.place_buffer) / max(1, len(self.place_buffer))
-        # self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * place_success_rate)
+        self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * place_success_rate)
 
         if place_success_rate > 0.5:
             self.check_collision = True
