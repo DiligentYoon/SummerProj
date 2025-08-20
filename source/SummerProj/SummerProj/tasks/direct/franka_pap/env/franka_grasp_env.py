@@ -276,6 +276,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                   (gamma * phi_s_prime_lift_loc - phi_s_lift_loc))
         self.r_lift_rot = torch.max(torch.zeros(1, device=self.device), 
                                   (gamma * phi_s_prime_lift_rot - phi_s_lift_rot))
+        
+        # self.r_lift_loc = gamma * phi_s_prime_lift_loc - phi_s_lift_loc
+        # self.r_lift_rot = gamma * phi_s_prime_lift_rot - phi_s_lift_rot
 
         
         # ========== Phase Reward : Place ===========
@@ -291,10 +294,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         phi_s_place_rot = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 1] + 1)
 
         self.r_place_loc = torch.max(torch.zeros(1, device=self.device), 
-                                # (gamma * phi_s_prime_place_loc - phi_s_place_loc)) / (hand_lin_vel*20 + 1)
                                     (gamma * phi_s_prime_place_loc - phi_s_place_loc))
         self.r_place_rot = torch.max(torch.zeros(1, device=self.device), 
                                 (gamma * phi_s_prime_place_rot - phi_s_place_rot))      
+        # self.r_place_loc = gamma * phi_s_prime_place_loc - phi_s_place_loc
+        # self.r_place_rot = gamma * phi_s_prime_place_rot - phi_s_place_rot   
         
 
 
@@ -314,6 +318,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)) / (hand_lin_vel*20 + 1)
         self.r_retract_rot = torch.max(torch.zeros(1, device=self.device),
                                     (gamma * phi_s_prime_retract_rot - phi_s_retract_rot))
+        # self.r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc) / (hand_lin_vel*20 + 1)
+        # self.r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot)
         
         # Open Gripper Bonus
         r_gripper = self.processed_actions[:, 21]
@@ -824,6 +830,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 "Lift_rot": torch.mean(self.r_lift_rot),
                 "Place_loc": torch.mean(self.r_place_loc),
                 "Place_rot": torch.mean(self.r_place_rot),
+                "Retract_loc": torch.mean(self.r_retract_loc[self.is_place]) if self.is_place.any() else 0,
+                "Retract_rot": torch.mean(self.r_retract_rot[self.is_place]) if self.is_place.any() else 0,
                 
             }
         )
