@@ -40,7 +40,8 @@ class FrankaGaussianPolicy(GaussianMixin, Model):
         # self.stiffness_head = nn.Linear(in_features_policy, 7)
         # self.damping_head = nn.Linear(in_features_policy, 7)
 
-        self.mean_head = nn.Linear(in_features_policy, self.num_actions)
+        self.mean_head = nn.Sequential(nn.Linear(in_features_policy, self.num_actions),
+                                       nn.Tanh())
 
         self.log_std_parameter = nn.Parameter(torch.zeros(self.num_actions))
 
@@ -53,7 +54,7 @@ class FrankaGaussianPolicy(GaussianMixin, Model):
         # stiffness_actions = F.tanh(self.stiffness_head(p))
         # damping_actions = F.tanh(self.damping_head(p))
         # mean_actions = torch.cat([ik_actions, stiffness_actions, damping_actions], dim=-1)
-        mean_actions = F.tanh(self.mean_head(p))
+        mean_actions = self.mean_head(p)
         
         return mean_actions, self.log_std_parameter, {}
 
