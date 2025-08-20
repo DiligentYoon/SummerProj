@@ -210,7 +210,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # if self.check_collision:
         #     terminated = self.is_success | self.is_contact | self.collision | self.still_lift | final_drop
         # else:
-        terminated = self.is_success | self.is_contact | self.still_lift | final_drop
+        # terminated = self.is_success | self.is_contact | self.still_lift | final_drop
+        terminated = self.is_success | self.is_contact | final_drop
+
 
         print(f"collision / drop / still lift : "
               f"{self.collision.float().sum().item()} / "  
@@ -410,25 +412,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.object_pos_w[:, :3], self.object_pos_w[:, 3:7],
             self.final_goal_pos_w[:, :3], self.final_goal_pos_w[:, 3:7]), dim=1)
         
-        # final_goal_pos_obj = torch.zeros_like(place_pos_obj)
-
-
-        # current_goal_info_b = torch.where(self.is_lift.unsqueeze(-1),
-        #                                   self.object_place_pos_b,
-        #                                   torch.where(self.is_grasp.unsqueeze(-1),
-        #                                               self.object_lift_pos_b,
-        #                                               self.sub_goal_b))
-        
-        # current_goal_info_tcp = torch.where(self.is_lift.unsqueeze(-1),
-        #                                     place_pos_tcp,
-        #                                     torch.where(self.is_grasp.unsqueeze(-1),
-        #                                                 lift_pos_tcp,
-        #                                                 sub_goal_pos_tcp))
-        
-        # current_goal_info_obj = torch.where(self.is_lift.unsqueeze(-1),
-        #                                     place_pos_obj,
-        #                                     lift_pos_obj)
-        
 
         current_goal_info_b = torch.where(self.is_place.unsqueeze(-1),
                                           self.final_goal_pos_b,
@@ -459,6 +442,17 @@ class FrankaGraspEnv(FrankaBaseEnv):
         current_phase = torch.where(self.is_place, 3.0, current_phase)
         current_phase /= 3.0
 
+        # Approach : [0, 0, 0, 0]
+        phase_encoding = torch.zeros((self.num_envs, 4), device=self.device)
+        # Retract : [0, 0, 0, 1]
+        phase_encoding[:, 3] = torch.where(self.is_place, 1.0, 0.0)
+        # Retract : [0, 0, 1, 0]
+        phase_encoding[:, 2] = torch.where(self.is_lift & ~self.is_place, 1.0, 0.0)
+        # Retract : [0, 1, 0, 0]
+        phase_encoding[:, 1] = torch.where(self.is_grasp & ~self.is_lift, 1.0, 0.0)
+        # Retract : [1, 0, 0, 0]
+        phase_encoding[:, 0] = torch.where(self.is_reach & ~self.is_grasp, 1.0, 0.0)
+
         obs = torch.cat(
             (   
                 # robot joint pose (9)
@@ -474,10 +468,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 # Goal Info w.r.t Obj frame (7)
                 current_goal_info_obj,
                 # Current Phase Info (1)
-                current_phase.unsqueeze(-1)
-                # self.is_grasp.unsqueeze(-1),
-                # self.is_lift.unsqueeze(-1),
-                # self.is_place.unsqueeze(-1),
+                current_phase.unsqueeze(-1),
+                # Phase One-Hot Encoding (4)
+                phase_encoding
             ), dim=1
         )
 
@@ -570,11 +563,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # ================ Curriculum =================
         place_success_rate = sum(self.place_buffer) / max(1, len(self.place_buffer))
         self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * place_success_rate)
-
-        if place_success_rate > 0.5:
-            self.check_collision = True
-        else:
-            self.check_collision = False
 
 
         
@@ -747,11 +735,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
 
     def update_phase_signal(self, env_ids, reset):
-        if self.cfg.w_rot > 0.0:
-            self.is_reach[env_ids] = torch.logical_or(torch.logical_and(self.approach_error[env_ids, 0] < self.cfg.loc_th, self.approach_error[env_ids, 1] < self.cfg.rot_th),
-                                                      self.prev_lift[env_ids])
-        else:
-            self.is_reach[env_ids] = self.approach_error[env_ids, 0] < self.cfg.loc_th
+        self.is_reach[env_ids] = torch.logical_or(torch.logical_and(self.approach_error[env_ids, 0] < self.cfg.loc_th, self.approach_error[env_ids, 1] < self.cfg.rot_th),
+                                                    self.prev_lift[env_ids])
 
         self.is_grasp[env_ids] = torch.logical_and(self.is_reach[env_ids], 
                                                    self.object_pos_b[env_ids, 2] > torch.max(torch.tensor(self.cfg.loc_th, device=self.device), self.obj_width[0]/2))
