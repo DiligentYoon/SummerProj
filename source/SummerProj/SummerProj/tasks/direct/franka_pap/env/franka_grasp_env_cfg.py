@@ -22,7 +22,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     episode_length_s = 15.0
     decimation = 5
     action_space = 22
-    observation_space = 52
+    observation_space = 51
     state_space = 0
 
     # simulation
@@ -77,6 +77,9 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
             )
         }
     )
+
+    # logging
+    logging_interval = 100
     
     # threshold
     loc_th = 5e-2
@@ -123,8 +126,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     wz = 1.0
 
     w_penalty = 0.05
-    w_contact = 0.01
-    w_gripper = 25.0
+    w_gripper = 1.0
     # w_ps = 2.0
     w_ps = 1.0
 

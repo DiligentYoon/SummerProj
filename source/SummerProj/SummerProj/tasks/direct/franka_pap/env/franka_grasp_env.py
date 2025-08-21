@@ -72,8 +72,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_in_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_first_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.is_open = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.is_first_open = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-        self.is_contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
 
         self.still_lift = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.drop = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -83,14 +85,15 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_lift = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.prev_open = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         
         # metric
         self.place_buffer = collections.deque(maxlen=100)
         self.lift_buffer = collections.deque(maxlen=100)
         self.success_buffer = collections.deque(maxlen=100)
         self.grasp_buffer = collections.deque(maxlen=100)
-
-        self.still_lift_buffer = collections.deque(maxlen=100) 
+        self.still_lift_buffer = collections.deque(maxlen=100)
+        self.logging_count = 0
 
         # Goal point & Via point marker
         self.lift_marker = VisualizationMarkers(self.cfg.lift_pos_marker_cfg)
@@ -166,9 +169,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # Control Command 세팅
         self.imp_controller.set_command(self.imp_commands)
 
-        # print(f"k_p : {self.imp_commands[:,   self.num_active_joints : 2*self.num_active_joints]}")
-        # print(f"zeta : {self.imp_commands[:, 2*self.num_active_joints : 3*self.num_active_joints]}")
-
         # ===== Gripper는 곧바로 Joint Position 버퍼에 저장 =====
         self._robot.set_joint_position_target(self.processed_actions[:, 21].reshape(-1, 1).repeat(1, 2), 
                                                joint_ids=[self.left_finger_joint_idx, self.right_finger_joint_idx])
@@ -204,51 +204,17 @@ class FrankaGraspEnv(FrankaBaseEnv):
     def _get_dones(self):
         self._compute_intermediate_values()
 
-        # final_drop = self.drop & ~self.is_in_place & ~self.is_place
-        final_drop = self.drop & ~self.is_in_place & ~self.is_place
-
-        # if self.check_collision:
-        #     terminated = self.is_success | self.is_contact | self.collision | self.still_lift | final_drop
-        # else:
-        # terminated = self.is_success | self.is_contact | self.still_lift | final_drop
-        terminated = self.is_success | self.is_contact | final_drop
-
-
-        print(f"collision / drop / still lift : "
-              f"{self.collision.float().sum().item()} / "  
-              f"{final_drop.float().sum().item()} / "
-              f"{self.still_lift.float().sum().item()}")
-        
+        # terminated = self.is_success | self.contact | self.still_lift | final_drop
+        terminated = self.is_success | self.contact | self.drop
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
         done = terminated | truncated
 
-        if torch.any(done):
-            done_ids = torch.where(done)[0]
-
-            self.success_buffer.extend(
-                self.is_success.index_select(0, done_ids).float().detach().cpu().tolist()
-            )
-
-            self.place_buffer.extend(
-                self.is_place.index_select(0, done_ids).float().detach().cpu().tolist()
-            )
-
-            self.lift_buffer.extend(
-                self.is_lift.index_select(0, done_ids).float().detach().cpu().tolist()
-            )
-
-            self.grasp_buffer.extend(
-                self.is_grasp.index_select(0, done_ids).float().detach().cpu().tolist()
-            )
-
-            self.still_lift_buffer.extend(
-                self.still_lift.index_select(0, done_ids).float().detach().cpu().tolist()
-            )
-
-            
+        self.logging_process(done)
 
         return terminated, truncated
+
+            
         
     def _get_rewards(self):
         # Action Penalty
@@ -289,7 +255,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         r_lift = self.is_lift.float()
 
         # Place Error Bonus
-        hand_lin_vel = torch.norm(self._robot.data.body_lin_vel_w[:, self.hand_link_idx, :3], dim=1)
+        hand_lin_vel = self.robot_hand_lin_vel
         phi_s_prime_place_loc = -torch.log(self.cfg.alpha_place * self.weighted_place_error[:, 0] + 1)
         phi_s_prime_place_rot = -torch.log(self.cfg.alpha_place * self.weighted_place_error[:, 1] + 1)
         phi_s_place_loc = -torch.log(self.cfg.alpha_place * self.prev_weighted_place_error[:, 0] + 1)
@@ -303,11 +269,17 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # self.r_place_rot = gamma * phi_s_prime_place_rot - phi_s_place_rot   
         
 
-
         # ========= Phase Reward : Retract ==========
         # Place Bonus
         r_first_place = self.is_first_place.float()
         r_place = self.is_place.float()
+
+        # Open Gripper Bonus
+        r_first_open = self.is_first_open.float()
+        r_gripper = (self.processed_actions[:, 21] > 0) & (self.is_place)
+        self.r_gripper = r_gripper.float()
+        
+        
 
         # Retract Error Bonus
         phi_s_prime_retract_loc = -torch.log(self.cfg.alpha_retract * self.weighted_retract_error[:, 0] + 1)
@@ -322,59 +294,38 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                     (gamma * phi_s_prime_retract_rot - phi_s_retract_rot))
         # self.r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc) / (hand_lin_vel*20 + 1)
         # self.r_retract_rot = (gamma * phi_s_prime_retract_rot - phi_s_retract_rot)
-        
-        # Open Gripper Bonus
-        r_gripper = self.processed_actions[:, 21]
 
 
         # Success Bonus
         r_success = self.is_success.float()
     
-
-        # =========== Contact Penalty =================
-        # p_contact = torch.logical_and(~self.is_grasp, torch.norm(self._object.data.root_vel_w, dim=1) > self.cfg.rot_th)
         
         # =========== Summation =============
         reward = torch.where(self.is_place,
-                     self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper * r_gripper,
-                     torch.where(self.is_lift,
-                                 self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
-                                 torch.where(self.is_grasp,
-                                             self.cfg.w_loc_lift * self.r_lift_loc + self.cfg.w_rot_lift * self.r_lift_rot,
-                                             self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot)))
+                             self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper * self.r_gripper,
+                             torch.where(self.is_lift,
+                                         self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
+                                         torch.where(self.is_grasp,
+                                                     self.cfg.w_loc_lift * self.r_lift_loc + self.cfg.w_rot_lift * self.r_lift_rot,
+                                                     self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot)))
     
-
-        # reward1 = torch.where(self.is_lift,
-        #                      self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
-        #                      torch.where(self.is_grasp,
-        #                                  self.cfg.w_loc_lift * self.r_lift_loc + self.cfg.w_rot_lift * self.r_lift_rot,
-        #                                  self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot))
         
 
         logic_reward = (self.cfg.w_grasp * r_grasp + 
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
-                        self.cfg.w_success * 0.5 * r_first_place + 
+                        self.cfg.w_success * 0.5 * r_first_place +
+                        self.cfg.w_success * 0.5 * r_first_open + 
                         self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
         
         reward += logic_reward
 
-        # print(f"new reward : {reward.item()}")
-
         self.r_total = reward
 
         # ========== Logging ===========
         self.update_additional_info()
-                 
-
-        # self.extras["log"]["Approach_loc"] = torch.mean(self.r_pos)
-        # self.extras["log"]["Approach_rot"] = torch.mean(self.r_rot)
-        # self.extras["log"]["Lift_loc"] = torch.mean(self.r_lift_loc)
-        # self.extras["log"]["Lift_rot"] = torch.mean(self.r_lift_rot)
-        # self.extras["log"]["Place_loc"] = torch.mean(self.r_place_loc)
-        # self.extras["log"]["Place_rot"] = torch.mean(self.r_place_rot)
 
 
         return reward
@@ -434,23 +385,24 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                                   lift_pos_obj,
                                                                   sub_goal_pos_tcp)))
         
-
         current_phase = torch.zeros(self.num_envs, device=self.device)
         current_phase = torch.where(self.is_grasp, 1.0, current_phase)
         current_phase = torch.where(self.is_lift,  2.0, current_phase)
         current_phase = torch.where(self.is_place, 3.0, current_phase)
-        # current_phase /= 3.0
+        current_phase /= 3.0
 
         # Appraoch : [0, 0, 0, 0]
-        phase_encoding = torch.zeros((self.num_envs, 4), device=self.device)
-        # Retract : [0, 0, 0, 1]
-        phase_encoding[:, 3] = torch.where(self.is_place, 1.0, 0.0)
-        # Place : [0, 0, 1, 0]
-        phase_encoding[:, 2] = torch.where(self.is_lift & ~self.is_place, 1.0, 0.0)
-        # Lift :  [0, 1, 0, 0]
-        phase_encoding[:, 1] = torch.where(self.is_grasp & ~self.is_lift, 1.0, 0.0)
+        phase_indices = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         # Grasp : [1, 0, 0, 0]
-        phase_encoding[:, 0] = torch.where(self.is_reach & ~self.is_grasp, 1.0, 0.0)
+        phase_indices = torch.where(self.is_reach & ~self.is_grasp, 1, phase_indices)
+        # Lift :  [0, 1, 0, 0]
+        phase_indices = torch.where(self.is_grasp & ~self.is_lift,  2, phase_indices)
+        # Place : [0, 0, 1, 0]
+        phase_indices = torch.where(self.is_lift  & ~self.is_place, 3, phase_indices)
+        # Retract : [0, 0, 0, 1]
+        phase_indices = torch.where(self.is_place,                  4, phase_indices)
+        # one-hot encoding
+        phase_encoding = torch.nn.functional.one_hot(phase_indices, num_classes=5).float()
 
         obs = torch.cat(
             (   
@@ -466,11 +418,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 target_frame_pos_b,
                 # Goal Info w.r.t Target frame (7)
                 current_goal_info_t,
-                # Current Phase Info (1)
-                current_phase.unsqueeze(-1),
-                # Target Gripper State (1)
-                gripper, 
-                # Phase Encoding (4)
+                # # Target Gripper State (1)
+                # gripper, 
+                # Phase Encoding (5)
                 phase_encoding
             ), dim=1
         )
@@ -549,10 +499,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
 
         # ================ Retract Point 리셋 ==================
-        # final_loc_noise = self._object.data.default_root_state[env_ids, :3] + self.scene.env_origins[env_ids, :3]
-        # final_loc_noise[:, 2] = 0.5
-        # final_rot_noise = quat_from_matrix(self.tcp_unit_tensor[env_ids])
-        # self.final_goal_pos_w[env_ids] = torch.cat([final_loc_noise, final_rot_noise], dim=1)
         self.final_goal_pos_w[env_ids, :3] = self.object_place_pos_w[env_ids, :3] + 0.2 * self.z_unit_tensor[env_ids]
         self.final_goal_pos_w[env_ids, 3:7] = self.object_place_pos_w[env_ids, 3:7]
         self.final_goal_pos_b[env_ids] = torch.cat(subtract_frame_transforms(
@@ -585,6 +531,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # data for joint
         self.robot_joint_pos[env_ids] = self._robot.data.joint_pos[env_ids]
         self.robot_joint_vel[env_ids] = self._robot.data.joint_vel[env_ids]
+        self.robot_hand_lin_vel[env_ids] = torch.norm(self._robot.data.body_lin_vel_w[env_ids, self.hand_link_idx, :3], dim=-1)
         # data for TCP (world & root Frame)
         self.robot_grasp_pos_b[env_ids] = calculate_robot_tcp(hand_pos_w, root_pos_w, self.tcp_offset_hand[env_ids])
         self.robot_grasp_pos_w[env_ids, 3:7] = quat_mul(root_pos_w[:, 3:7], self.robot_grasp_pos_b[env_ids, 3:7])
@@ -651,6 +598,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_place[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_lift[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
+            self.prev_open[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_imp_commands[env_ids] = torch.zeros_like(self.imp_commands[env_ids], device=self.device)
         else:
             self.prev_weighted_retract_error[env_ids] = self.weighted_retract_error[env_ids]
@@ -663,6 +611,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_lift[env_ids] = self.is_lift[env_ids].clone()
             self.prev_grasp[env_ids] = self.is_grasp[env_ids].clone()
             self.prev_place[env_ids] = self.is_place[env_ids].clone()
+            self.prev_open[env_ids] = self.is_open[env_ids].clone()
 
 
         # ========= Position Error 업데이트 =========
@@ -748,8 +697,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
                                                     self.prev_lift[env_ids])
 
         
-        self.is_in_place[env_ids] = (self.is_lift[env_ids]) & (self.place_error[env_ids, 0] < self.cfg.place_loc_th * 4) & (self.approach_error[env_ids, 0] < self.cfg.loc_th * 2)
-
+        self.is_in_place[env_ids] = (self.is_lift[env_ids]) & \
+                                    (self.place_error[env_ids, 0] < self.cfg.place_loc_th * 4) & \
+                                    (self.approach_error[env_ids, 0] < self.cfg.loc_th * 2)
 
         self.is_place[env_ids] = torch.logical_or(torch.logical_and(self.is_lift[env_ids], 
                                                                     torch.logical_and(self.place_error[env_ids, 0] < self.cfg.place_loc_th,
@@ -758,42 +708,98 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
         self.is_first_place[env_ids] = self.is_place[env_ids] & ~self.prev_place[env_ids]
         
-        self.is_success[env_ids] = torch.logical_and(self.is_place[env_ids], 
-                                                     torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
-                                                                       self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
         # place에서 place zone인 경우, grasp 조건 무효
         self.is_grasp[env_ids] = (self.is_grasp[env_ids]) | (self.is_in_place[env_ids]) | (self.is_place[env_ids])
 
 
+        gripper_state = torch.stack([self.robot_joint_pos[env_ids, self.left_finger_joint_idx], self.robot_joint_pos[env_ids, self.right_finger_joint_idx]], dim=-1)
+        self.is_open[env_ids] = self.is_place[env_ids] & (torch.mean(gripper_state, dim=-1) > 0.99 * 0.04)
+        self.is_first_open[env_ids] = self.is_open[env_ids] & ~self.prev_open[env_ids]
+
+        self.is_success[env_ids] = torch.logical_and(self.is_open[env_ids], 
+                                                     torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
+                                                                       self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
+
+
     def update_end_condition(self, env_ids, reset):
         if not reset:
-            approach_contact = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
-                                                                    self.approach_error[env_ids, 0] < self.cfg.loc_th * 4),
-                                                 torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 1e-1)
-            
-            # retract_contact = (self.is_place[env_ids]) & (self.place_error[env_ids, 0] < self.cfg.loc_th * 4) & (torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 1e-1)
+            self.contact[env_ids] = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
+                                                                            self.approach_error[env_ids, 0] < self.cfg.loc_th * 4),
+                                                         torch.norm(self._object.data.root_vel_w[env_ids], dim=1) > 1e-1)
 
-            self.is_contact[env_ids] = approach_contact
+            quasi_drop  = (torch.logical_and(self.prev_grasp[env_ids], ~self.is_grasp[env_ids]) | \
+                           torch.logical_and(self.object_pos_w[env_ids, 2] < 0, ~self.is_grasp[env_ids]))
+            self.drop[env_ids] = quasi_drop & ~self.is_place[env_ids] & ~self.is_in_place[env_ids]
 
-            print(f"\n")
-            print(
-                    f"Contact / Reach / Grasp / Lift / Place / Success : "
-                    f"{self.is_contact.sum().item()} / "
-                    f"{self.is_reach.sum().item()} / "
-                    f"{self.is_grasp.sum().item()} / "
-                    f"{self.is_lift.sum().item()} / "
-                    f"{self.is_place.sum().item()} / "
-                    f"{self.is_success.sum().item()}"
-                )
+            self.collision[env_ids] = (self.is_lift[env_ids]) & (self.object_pos_b[env_ids, 2] < self.object_place_pos_b[env_ids, 2]) & (~self.is_place[env_ids])
+
+            self.still_lift[env_ids] = (self.is_place[env_ids]) & (self.object_pos_b[env_ids, 2] > self.object_place_pos_b[env_ids, 2] * 2)
 
         else:
-            self.is_contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            self.contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            self.drop[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            self.collision[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            self.still_lift[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            
 
 
-        self.still_lift[env_ids] = (self.is_place[env_ids]) & (self.object_pos_b[env_ids, 2] > self.object_place_pos_b[env_ids, 2] * 2)
-        self.collision[env_ids] = (self.is_lift[env_ids]) & (self.object_pos_b[env_ids, 2] < self.object_place_pos_b[env_ids, 2]) & (~self.is_place[env_ids])
-        self.drop[env_ids] = torch.logical_and(self.prev_grasp[env_ids], ~self.is_grasp[env_ids]) | torch.logical_and(self.object_pos_w[env_ids, 2] < 0, ~self.is_grasp[env_ids])
+    def logging_process(self, done):
+        if torch.any(done):
+            done_ids = torch.where(done)[0]
 
+            self.success_buffer.extend(
+                self.is_success.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+
+            self.place_buffer.extend(
+                self.is_place.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+
+            self.lift_buffer.extend(
+                self.is_lift.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+
+            self.grasp_buffer.extend(
+                self.is_grasp.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+
+            self.still_lift_buffer.extend(
+                self.still_lift.index_select(0, done_ids).float().detach().cpu().tolist()
+            )
+
+            if self.logging_count % self.cfg.logging_interval == 0:
+                print("============================== [INFO] ================================")
+                print(
+                        f"[Phase INFO] : Reach / Grasp / Lift / Place / Open : "
+                        f"{self.is_reach.sum().item()}/"
+                        f"{self.is_grasp.sum().item()}/"
+                        f"{self.is_lift.sum().item()}/"
+                        f"{self.is_place.sum().item()}/"
+                        f"{self.is_open.sum().item()}"
+                    )
+                print(
+                        f"[End INFO] : Contact / Drop / Collision / Still Lift / Success : "
+                        f"{self.contact.sum().item()}/"
+                        f"{self.drop.sum().item()}/"
+                        f"{self.collision.sum().item()}/"
+                        f"{self.still_lift.sum().item()}/"
+                        f"{self.is_success.sum().item()}"
+                    )
+                
+                print(
+                        f"[Additional Physics INFO] : MGS / MHV : "
+                        f"{torch.mean(self.r_gripper[self.is_place]).item() if self.is_place.any() else 0}/"
+                        f"{torch.mean(self.robot_hand_lin_vel[self.is_place]).item() if self.is_place.any() else 0}"
+                    )
+                
+                print(
+                        f"[Additional Logical INFO] : First Open : "
+                        f"{self.is_first_open[self.is_place].sum().item() if self.is_place.any() else 0} \n"
+                    )
+
+                self.logging_count = 0
+ 
+            self.logging_count += 1
 
 
 
@@ -816,8 +822,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 "Lift_rot": torch.mean(self.r_lift_rot),
                 "Place_loc": torch.mean(self.r_place_loc),
                 "Place_rot": torch.mean(self.r_place_rot),
-                "Retract_loc": torch.mean(self.r_retract_loc[self.is_place]) if self.is_place.any() else 0,
-                "Retract_rot": torch.mean(self.r_retract_rot[self.is_place]) if self.is_place.any() else 0,
+                "Retract_loc": torch.mean(self.r_retract_loc[self.is_place])  if self.is_place.any() else 0,
+                "Retract_rot": torch.mean(self.r_retract_rot[self.is_place])  if self.is_place.any() else 0,
+                "Gripper_commands": torch.mean(self.r_gripper[self.is_place]) if self.is_place.any() else 0,
                 
             }
         )

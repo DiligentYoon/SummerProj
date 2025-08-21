@@ -52,6 +52,7 @@ class FrankaBaseEnv(DirectRLEnv):
         # Default Object and Robot Pose
         self.robot_joint_pos = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
         self.robot_joint_vel = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
+        self.robot_hand_lin_vel = torch.zeros(self.num_envs, device=self.device)
         self.object_pos_w = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_pos_b = torch.zeros((self.num_envs, 7), device=self.device)
         self.object_linvel = torch.zeros((self.num_envs, 3), device=self.device)
