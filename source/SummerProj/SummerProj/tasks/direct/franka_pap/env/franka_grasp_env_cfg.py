@@ -19,10 +19,10 @@ from ..base.franka_base_env_cfg import FrankaBaseEnvCfg
 @configclass
 class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     # env
-    episode_length_s = 15.0
+    episode_length_s = 10.0
     decimation = 5
     action_space = 22
-    observation_space = 52
+    observation_space = 51
     state_space = 0
 
     # simulation
@@ -111,7 +111,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     w_loc_place = 20.0
     w_rot_place = 10.0
 
-    w_loc_retract = 20.0
+    w_loc_retract = 40.0
     w_rot_retract = 10.0
 
     # w_grasp = 1.5
@@ -126,7 +126,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     wz = 1.0
 
     w_penalty = 0.05
-    w_gripper = 1.0
+    w_gripper = 2.0
     # w_ps = 2.0
     w_ps = 1.0
 

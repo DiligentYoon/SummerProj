@@ -72,20 +72,19 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_in_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_first_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-        self.is_open = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_first_open = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
 
         self.still_lift = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.drop = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.re_pick = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.collision = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         
         # Previous Phase Signal
         self.prev_grasp = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_lift = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.prev_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-        self.prev_open = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         
         # metric
         self.place_buffer = collections.deque(maxlen=100)
@@ -269,19 +268,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # self.r_place_rot = gamma * phi_s_prime_place_rot - phi_s_place_rot   
 
 
-
-        
-        # =========== Phase Reward : Open ==============
-        # Place Bonus
-        r_first_place = self.is_first_place.float()
-        r_place = self.is_place.float()
-        
-
         # =========== Phase Reward : Retract ==============
-        # Open Gripper Bonus
-        r_open = self.is_open.float()
+        r_first_place = self.is_first_place.float()
         r_first_open = self.is_first_open.float()
-        r_gripper = (self.processed_actions[:, 21] > 0) & (self.is_open)
+        r_place = self.is_place.float()
+        r_gripper = (self.processed_actions[:, 21] > 0)
         self.r_gripper = r_gripper.float()
         
 
@@ -305,31 +296,20 @@ class FrankaGraspEnv(FrankaBaseEnv):
     
         
         # =========== Summation =============
-        # reward = torch.where(self.is_place,
-        #                      self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper * self.r_gripper,
-        #                      torch.where(self.is_lift,
-        #                                  self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
-        #                                  torch.where(self.is_grasp,
-        #                                              self.cfg.w_loc_lift * self.r_lift_loc + self.cfg.w_rot_lift * self.r_lift_rot,
-        #                                              self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot)))
-        reward = torch.where(self.is_open,
+        reward = torch.where(self.is_place,
                              self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper * self.r_gripper,
-                             torch.where(self.is_place,
-                                         -hand_lin_vel,
-                                         torch.where(self.is_lift,
-                                                     self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
-                                                     torch.where(self.is_grasp,
-                                                                 self.cfg.w_loc_lift * self.r_lift_loc + self.cfg.w_rot_lift * self.r_lift_rot,
-                                                                 self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot))))
+                             torch.where(self.is_lift,
+                                         self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
+                                         torch.where(self.is_grasp,
+                                                     self.cfg.w_loc_lift * self.r_lift_loc + self.cfg.w_rot_lift * self.r_lift_rot,
+                                                     self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot)))
     
         
 
         logic_reward = (self.cfg.w_grasp * r_grasp + 
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
-                        self.cfg.w_place * r_open + 
-                        self.cfg.w_success * 0.5 * r_first_place +
-                        self.cfg.w_success * 0.5 * r_first_open + 
+                        # self.cfg.w_success * 0.5 * r_first_place + 
                         self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
@@ -388,16 +368,14 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #                                               torch.where(self.is_grasp.unsqueeze(-1),
         #                                                           self.object_pos_b,
         #                                                           self.robot_grasp_pos_b)))
-        target_frame_pos_b = torch.where(self.is_open.unsqueeze(-1),
+        target_frame_pos_b = torch.where(self.is_place.unsqueeze(-1),
                                          self.robot_grasp_pos_b,
-                                         torch.where(self.is_place.unsqueeze(-1),
+                                         torch.where(self.is_lift.unsqueeze(-1),
                                                      self.object_pos_b,
-                                                     torch.where(self.is_lift.unsqueeze(-1),
+                                                     torch.where(self.is_grasp.unsqueeze(-1),
                                                                  self.object_pos_b,
-                                                                 torch.where(self.is_grasp.unsqueeze(-1),
-                                                                             self.object_pos_b,
-                                                                             self.robot_grasp_pos_b))))
-                    
+                                                                 self.robot_grasp_pos_b)))
+                     
 
         # current_goal_info_t = torch.where(self.is_place.unsqueeze(-1),
         #                                   final_goal_pos_tcp,
@@ -407,15 +385,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #                                                           lift_pos_obj,
         #                                                           sub_goal_pos_tcp)))
 
-        current_goal_info_t = torch.where(self.is_open.unsqueeze(-1),
+        current_goal_info_t = torch.where(self.is_place.unsqueeze(-1),
                                           final_goal_pos_tcp,
-                                          torch.where(self.is_place.unsqueeze(-1),
+                                          torch.where(self.is_lift.unsqueeze(-1),
                                                       place_pos_obj,
-                                                      torch.where(self.is_lift.unsqueeze(-1),
-                                                                  place_pos_obj,
-                                                                  torch.where(self.is_grasp.unsqueeze(-1),
-                                                                              lift_pos_obj,
-                                                                              sub_goal_pos_tcp))))
+                                                      torch.where(self.is_grasp.unsqueeze(-1),
+                                                                  lift_pos_obj,
+                                                                  sub_goal_pos_tcp)))
         
         # current_phase = torch.zeros(self.num_envs, device=self.device)
         # current_phase = torch.where(self.is_grasp, 1.0, current_phase)
@@ -423,20 +399,18 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # current_phase = torch.where(self.is_place, 3.0, current_phase)
         # current_phase /= 3.0
 
-        # Appraoch : [0, 0, 0, 0, 0]
+        # Appraoch : [0, 0, 0, 0]
         phase_indices = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-        # Grasp : [1, 0, 0, 0, 0]
+        # Grasp : [1, 0, 0, 0]
         phase_indices = torch.where(self.is_reach & ~self.is_grasp, 1, phase_indices)
-        # Lift :  [0, 1, 0, 0, 0]
+        # Lift :  [0, 1, 0, 0]
         phase_indices = torch.where(self.is_grasp & ~self.is_lift,  2, phase_indices)
-        # Place : [0, 0, 1, 0, 0]
+        # Place : [0, 0, 1, 0]
         phase_indices = torch.where(self.is_lift  & ~self.is_place, 3, phase_indices)
-        # Open : [0, 0, 0, 1, 0]
-        phase_indices = torch.where(self.is_place & ~self.is_open,  4, phase_indices)
-        # Retract : [0, 0, 0, 0, 1]
-        phase_indices = torch.where(self.is_open,                   5, phase_indices)
+        # Open : [0, 0, 0, 1]
+        phase_indices = torch.where(self.is_place,                  4, phase_indices)
         # one-hot encoding
-        phase_encoding = torch.nn.functional.one_hot(phase_indices, num_classes=6).float()
+        phase_encoding = torch.nn.functional.one_hot(phase_indices, num_classes=5).float()
 
         obs = torch.cat(
             (   
@@ -454,7 +428,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 current_goal_info_t,
                 # # Target Gripper State (1)
                 # gripper, 
-                # Phase Encoding (6)
+                # Phase Encoding (5)
                 phase_encoding
             ), dim=1
         )
@@ -632,7 +606,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_place[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_lift[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
-            self.prev_open[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_imp_commands[env_ids] = torch.zeros_like(self.imp_commands[env_ids], device=self.device)
         else:
             self.prev_weighted_retract_error[env_ids] = self.weighted_retract_error[env_ids]
@@ -645,7 +618,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_lift[env_ids] = self.is_lift[env_ids].clone()
             self.prev_grasp[env_ids] = self.is_grasp[env_ids].clone()
             self.prev_place[env_ids] = self.is_place[env_ids].clone()
-            self.prev_open[env_ids] = self.is_open[env_ids].clone()
 
 
         # ========= Position Error 업데이트 =========
@@ -747,10 +719,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
 
         gripper_state = torch.stack([self.robot_joint_pos[env_ids, self.left_finger_joint_idx], self.robot_joint_pos[env_ids, self.right_finger_joint_idx]], dim=-1)
-        self.is_open[env_ids] = self.is_place[env_ids] & (torch.mean(gripper_state, dim=-1) > 0.99 * 0.04)
-        self.is_first_open[env_ids] = self.is_open[env_ids] & ~self.prev_open[env_ids]
 
-        self.is_success[env_ids] = torch.logical_and(self.is_open[env_ids], 
+        self.is_success[env_ids] = torch.logical_and(self.is_place[env_ids], 
                                                      torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
                                                                        self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
 
@@ -804,12 +774,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
             if self.logging_count % self.cfg.logging_interval == 0:
                 print("============================== [INFO] ================================")
                 print(
-                        f"[Phase INFO] : Reach / Grasp / Lift / Place / Open : "
+                        f"[Phase INFO] : Reach / Grasp / Lift / Place: "
                         f"{self.is_reach.sum().item()}/"
                         f"{self.is_grasp.sum().item()}/"
                         f"{self.is_lift.sum().item()}/"
-                        f"{self.is_place.sum().item()}/"
-                        f"{self.is_open.sum().item()}"
+                        f"{self.is_place.sum().item()}"
                     )
                 print(
                         f"[End INFO] : Contact / Drop / Collision / Still Lift / Success : "
@@ -822,13 +791,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 
                 print(
                         f"[Additional Physics INFO] : MGS / MHV : "
-                        f"{torch.mean(self.r_gripper[self.is_open]).item() if self.is_open.any() else 0}/"
-                        f"{torch.mean(self.robot_hand_lin_vel[self.is_open]).item() if self.is_open.any() else 0}"
-                    )
-                
-                print(
-                        f"[Additional Logical INFO] : First Open : "
-                        f"{self.is_first_open[self.is_place].sum().item() if self.is_place.any() else 0} \n"
+                        f"{torch.mean(self.r_gripper[self.is_place]).item() if self.is_place.any() else 0}/"
+                        f"{torch.mean(self.robot_hand_lin_vel[self.is_place]).item() if self.is_place.any() else 0}"
                     )
 
                 self.logging_count = 0
