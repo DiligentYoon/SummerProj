@@ -1,4 +1,4 @@
-from typing import Any, Mapping
+from typing import Any, Mapping, Union
 import copy
 
 # hydra.utils.instantiate를 사용하기 위해 임포트
@@ -9,6 +9,12 @@ from omegaconf import DictConfig
 from skrl import logger
 from skrl.utils.runner.torch import Runner
 from skrl.models.torch import Model
+from skrl.agents.torch import Agent
+from skrl.envs.wrappers.torch import MultiAgentEnvWrapper, Wrapper
+from skrl.trainers.torch import Trainer
+
+from source.SummerProj.SummerProj.tasks.direct.franka_pap.trainers.grasp_trainer import GraspTrainer
+
 
 class AISLRunner(Runner):
     # 기존 SKRL에서 제공하는 Runner Class를 오버라이딩
@@ -38,7 +44,7 @@ class AISLRunner(Runner):
                     model_config = models_cfg[role]
             
                     if "_target_" in model_config:
-                        print(f"[CustomRunner] Instantiating model for role '{role}' via Hydra _target_...")
+                        print(f"[AISLRunner] Instantiating model for role '{role}' via Hydra _target_...")
                         # 커스텀 신호인 _target_이 있다면, Hydra를 사용해 모델을 직접 생성
                         # 모델의 __init__에 필요한 기본 인자들을 추가
                         model_config["observation_space"] = observation_spaces[agent_id]
@@ -49,7 +55,7 @@ class AISLRunner(Runner):
                         models[agent_id][role] = hydra.utils.instantiate(model_config)
                     else:
                         # _target_이 없다면, 원래 SKRL에서 제공하는 Runner 클래스 그대로 사용
-                        print(f"[CustomRunner] Instantiating model for role '{role}' via skrl's default method...")
+                        print(f"[AISLRunner] Instantiating model for role '{role}' via skrl's default method...")
                         model_class_str = model_config.get("class")
                         if not model_class_str:
                             raise ValueError(f"No 'class' or '_target_' field defined in 'models:{role}' cfg")
@@ -74,3 +80,31 @@ class AISLRunner(Runner):
                 raise NotImplementedError("Shared models are not implemented in this custom runner example.")
                     
             
+    def _generate_trainer(
+        self, env: Union[Wrapper, MultiAgentEnvWrapper], cfg: Mapping[str, Any], agent: Agent
+    ) -> Trainer:
+        """Generate trainer instance according to the environment specification and the given config and agent
+
+        :param env: Wrapped environment
+        :param cfg: A configuration dictionary
+        :param agent: Agent's model instances
+
+        :return: Trainer instances
+        """
+        # instantiate trainer
+        print(f"[AISLRunner] Instantiating GraspTrainer via skrl's default method...")
+        return GraspTrainer(env=env, agents=agent, cfg=cfg["trainer"])
+
+    def run(self, mode: str = "train") -> None:
+        """Run the training/evaluation
+
+        :param mode: Running mode: ``"train"`` for training or ``"eval"`` for evaluation (default: ``"train"``)
+
+        :raises ValueError: The specified running mode is not valid
+        """
+        if mode == "train":
+            self._trainer.train()
+        elif mode == "eval":
+            self._trainer.eval()
+        else:
+            raise ValueError(f"Unknown running mode: {mode}")
