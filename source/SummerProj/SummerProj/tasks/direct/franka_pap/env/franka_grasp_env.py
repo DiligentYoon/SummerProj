@@ -72,7 +72,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_in_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_first_place = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
-        self.is_first_open = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
+        self.is_success_put = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.is_success = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
         self.contact = torch.zeros_like(self.is_reach, dtype=torch.bool, device=self.device)
 
@@ -145,7 +145,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.processed_actions[:, 14:21] = torch.clamp(self.actions[:, 14:21] * self.cfg.damping_scale,
                                                        self.robot_dof_damping_lower_limits,
                                                        self.robot_dof_damping_upper_limits)
-        
+
         self.processed_actions[:, 21] = torch.where(self.actions[:, 21] > 0, 0.04, 0.0)
         
         # ===== Impedance Controller Parameter 세팅 with LPF Smoothing =====
@@ -203,7 +203,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
     def _get_dones(self):
         self._compute_intermediate_values()
 
-        # terminated = self.is_success | self.contact | self.still_lift | final_drop
+        # terminated = self.is_success | self.contact | self.still_lift | self.drop
         terminated = self.is_success | self.contact | self.drop
         truncated = self.episode_length_buf >= self.max_episode_length - 1
 
@@ -269,11 +269,11 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
 
         # =========== Phase Reward : Retract ==============
-        r_first_place = self.is_first_place.float()
-        r_first_open = self.is_first_open.float()
         r_place = self.is_place.float()
         r_gripper = (self.processed_actions[:, 21] > 0)
+        r_gripper_state = torch.stack([self.robot_joint_pos[:, self.left_finger_joint_idx], self.robot_joint_pos[:, self.right_finger_joint_idx]], dim=-1).mean(dim=-1)
         self.r_gripper = r_gripper.float()
+        self.r_gripper_state = (r_gripper_state > 0.99 * 0.04).float()
         
 
         # Retract Error Bonus
@@ -284,7 +284,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         
         self.r_retract_loc = torch.max(torch.zeros(1, device=self.device),
-                               (gamma * phi_s_prime_retract_loc - phi_s_retract_loc)) / (hand_lin_vel*20 + 1)
+                               (gamma * phi_s_prime_retract_loc - phi_s_retract_loc))
         self.r_retract_rot = torch.max(torch.zeros(1, device=self.device),
                                     (gamma * phi_s_prime_retract_rot - phi_s_retract_rot))
         # self.r_retract_loc = (gamma * phi_s_prime_retract_loc - phi_s_retract_loc) / (hand_lin_vel*20 + 1)
@@ -292,12 +292,13 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
 
         # Success Bonus
-        r_success = self.is_success.float()
+        r_success_with_put = self.is_success_put.float()
+        r_success = (self.is_success & self.still_lift).float()
     
         
         # =========== Summation =============
         reward = torch.where(self.is_place,
-                             self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper * self.r_gripper,
+                             self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper_state * self.r_gripper_state,
                              torch.where(self.is_lift,
                                          self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
                                          torch.where(self.is_grasp,
@@ -309,8 +310,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         logic_reward = (self.cfg.w_grasp * r_grasp + 
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
-                        # self.cfg.w_success * 0.5 * r_first_place + 
-                        self.cfg.w_success * r_success -
+                        # self.cfg.w_success * 0.5 * r_first_place +
+                        self.cfg.w_success * r_success_with_put + 
+                        self.cfg.w_success * 0.25 * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
         
@@ -517,6 +519,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # ================ Curriculum =================
         place_success_rate = sum(self.place_buffer) / max(1, len(self.place_buffer))
+        # episode_success_rate = sum(self.success_buffer) / max(1, len(self.success_buffer))
+        # still_lift_rate = sum(self.still_lift_buffer) / max(1, len(self.still_lift_buffer))
         self.cfg.place_loc_th = self.cfg.place_loc_th_min + (self.cfg.place_loc_th_max - self.cfg.place_loc_th_min) * math.exp(-self.cfg.decay_ratio * place_success_rate)
 
 
@@ -718,13 +722,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_grasp[env_ids] = (self.is_grasp[env_ids]) | (self.is_in_place[env_ids]) | (self.is_place[env_ids])
 
 
-        gripper_state = torch.stack([self.robot_joint_pos[env_ids, self.left_finger_joint_idx], self.robot_joint_pos[env_ids, self.right_finger_joint_idx]], dim=-1)
-
-        self.is_success[env_ids] = torch.logical_and(self.is_place[env_ids], 
-                                                     torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
-                                                                       self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
-
-
     def update_end_condition(self, env_ids, reset):
         if not reset:
             self.contact[env_ids] = torch.logical_and(torch.logical_and(~self.is_reach[env_ids], 
@@ -739,11 +736,20 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
             self.still_lift[env_ids] = (self.is_place[env_ids]) & (self.object_pos_b[env_ids, 2] > self.object_place_pos_b[env_ids, 2] * 2)
 
+            self.is_success[env_ids] = torch.logical_and(self.is_place[env_ids], 
+                                                torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
+                                                                self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
+            
+            self.is_success_put[env_ids] = self.is_success & ~self.still_lift
+    
+
         else:
             self.contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             self.drop[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             self.collision[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             self.still_lift[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            self.is_success[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            self.is_success_put[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             
 
 
@@ -781,19 +787,21 @@ class FrankaGraspEnv(FrankaBaseEnv):
                         f"{self.is_place.sum().item()}"
                     )
                 print(
-                        f"[End INFO] : Contact / Drop / Collision / Still Lift / Success : "
+                        f"[End INFO] : Contact / Drop / Collision / Still Lift / Success / Put Success : "
                         f"{self.contact.sum().item()}/"
                         f"{self.drop.sum().item()}/"
                         f"{self.collision.sum().item()}/"
                         f"{self.still_lift.sum().item()}/"
-                        f"{self.is_success.sum().item()}"
+                        f"{self.is_success.sum().item()}/"
+                        f"{self.is_success_put.sum().item()}"
                     )
                 
                 print(
-                        f"[Additional Physics INFO] : MGS / MHV : "
-                        f"{torch.mean(self.r_gripper[self.is_place]).item() if self.is_place.any() else 0}/"
-                        f"{torch.mean(self.robot_hand_lin_vel[self.is_place]).item() if self.is_place.any() else 0}"
-                    )
+                        f"[Additional Physics INFO] : MGAS / MGS / MHV : "
+                        f"{torch.mean(self.r_gripper[self.is_place]).item() if self.is_place.any() else 0 :.3f}/"
+                        f"{torch.mean(self.r_gripper_state[self.is_place].float()).item() if self.is_place.any() else 0 :.3f}/"
+                        f"{torch.mean(self.robot_hand_lin_vel[self.is_place]).item() if self.is_place.any() else 0 :.3f}"
+                    )         
 
                 self.logging_count = 0
  

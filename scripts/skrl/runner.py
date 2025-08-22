@@ -13,7 +13,7 @@ from skrl.agents.torch import Agent
 from skrl.envs.wrappers.torch import MultiAgentEnvWrapper, Wrapper
 from skrl.trainers.torch import Trainer
 
-from source.SummerProj.SummerProj.tasks.direct.franka_pap.trainers.grasp_trainer import GraspTrainer
+# from source.SummerProj.SummerProj.tasks.direct.franka_pap.trainers.grasp_trainer import GraspTrainer
 
 
 class AISLRunner(Runner):
@@ -80,31 +80,31 @@ class AISLRunner(Runner):
                 raise NotImplementedError("Shared models are not implemented in this custom runner example.")
                     
             
-    def _generate_trainer(
-        self, env: Union[Wrapper, MultiAgentEnvWrapper], cfg: Mapping[str, Any], agent: Agent
-    ) -> Trainer:
-        """Generate trainer instance according to the environment specification and the given config and agent
+    # def _generate_trainer(
+    #     self, env: Union[Wrapper, MultiAgentEnvWrapper], cfg: Mapping[str, Any], agent: Agent
+    # ) -> Trainer:
+    #     """Generate trainer instance according to the environment specification and the given config and agent
 
-        :param env: Wrapped environment
-        :param cfg: A configuration dictionary
-        :param agent: Agent's model instances
+    #     :param env: Wrapped environment
+    #     :param cfg: A configuration dictionary
+    #     :param agent: Agent's model instances
 
-        :return: Trainer instances
-        """
-        # instantiate trainer
-        print(f"[AISLRunner] Instantiating GraspTrainer via skrl's default method...")
-        return GraspTrainer(env=env, agents=agent, cfg=cfg["trainer"])
+    #     :return: Trainer instances
+    #     """
+    #     # instantiate trainer
+    #     print(f"[AISLRunner] Instantiating GraspTrainer via skrl's default method...")
+    #     return GraspTrainer(env=env, agents=agent, cfg=cfg["trainer"])
 
-    def run(self, mode: str = "train") -> None:
-        """Run the training/evaluation
+    # def run(self, mode: str = "train") -> None:
+    #     """Run the training/evaluation
 
-        :param mode: Running mode: ``"train"`` for training or ``"eval"`` for evaluation (default: ``"train"``)
+    #     :param mode: Running mode: ``"train"`` for training or ``"eval"`` for evaluation (default: ``"train"``)
 
-        :raises ValueError: The specified running mode is not valid
-        """
-        if mode == "train":
-            self._trainer.train()
-        elif mode == "eval":
-            self._trainer.eval()
-        else:
-            raise ValueError(f"Unknown running mode: {mode}")
+    #     :raises ValueError: The specified running mode is not valid
+    #     """
+    #     if mode == "train":
+    #         self._trainer.train()
+    #     elif mode == "eval":
+    #         self._trainer.eval()
+    #     else:
+    #         raise ValueError(f"Unknown running mode: {mode}")

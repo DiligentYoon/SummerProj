@@ -14,6 +14,7 @@ a more user-friendly way.
 
 import argparse
 import sys
+import os
 import numpy as np
 
 from isaaclab.app import AppLauncher
@@ -55,6 +56,7 @@ if args_cli.video:
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
+sys.path.append(os.getcwd())
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -63,7 +65,6 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
-import os
 import random
 from datetime import datetime
 

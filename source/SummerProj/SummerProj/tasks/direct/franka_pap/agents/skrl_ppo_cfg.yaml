@@ -32,13 +32,13 @@ memory:
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
 agent:
   class: PPO
-  rollouts: 12
+  rollouts: 36
   # rollouts: 12
   learning_epochs: 4
   mini_batches: 4 
   discount_factor: 0.99
   lambda: 0.95
-  learning_rate: 4.0e-04
+  learning_rate: 6.0e-04
   # learning rate: 1.0e-04
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
