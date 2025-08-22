@@ -85,7 +85,7 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     loc_th = 5e-2
     rot_th = 1e-1
 
-    place_loc_th = 5e-2
+    place_loc_th = 2e-2
     place_rot_th = 1e-1
 
     retract_loc_th = 5e-2

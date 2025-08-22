@@ -293,12 +293,20 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
         # Success Bonus
         r_success_with_put = self.is_success_put.float()
-        r_success = (self.is_success & self.still_lift).float()
+        # r_success = (self.is_success & self.still_lift).float()
+        r_success = self.is_success.float()
     
         
         # =========== Summation =============
+        # reward = torch.where(self.is_place,
+        #                      self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper_state * self.r_gripper_state,
+        #                      torch.where(self.is_lift,
+        #                                  self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
+        #                                  torch.where(self.is_grasp,
+        #                                              self.cfg.w_loc_lift * self.r_lift_loc + self.cfg.w_rot_lift * self.r_lift_rot,
+        #                                              self.cfg.w_pos * self.r_pos + self.cfg.w_rot * self.r_rot)))
         reward = torch.where(self.is_place,
-                             self.cfg.w_loc_retract * self.r_retract_loc + self.cfg.w_rot_retract * self.r_retract_rot + self.cfg.w_gripper_state * self.r_gripper_state,
+                             self.cfg.w_gripper * self.r_gripper - hand_lin_vel,
                              torch.where(self.is_lift,
                                          self.cfg.w_loc_place * self.r_place_loc + self.cfg.w_rot_place * self.r_place_rot,
                                          torch.where(self.is_grasp,
@@ -310,9 +318,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         logic_reward = (self.cfg.w_grasp * r_grasp + 
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
-                        # self.cfg.w_success * 0.5 * r_first_place +
-                        self.cfg.w_success * r_success_with_put + 
-                        self.cfg.w_success * 0.25 * r_success -
+                        # self.cfg.w_success * 0.5 * r_first_place + 
+                        self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
         
@@ -371,7 +378,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #                                                           self.object_pos_b,
         #                                                           self.robot_grasp_pos_b)))
         target_frame_pos_b = torch.where(self.is_place.unsqueeze(-1),
-                                         self.robot_grasp_pos_b,
+                                         self.object_pos_b,
                                          torch.where(self.is_lift.unsqueeze(-1),
                                                      self.object_pos_b,
                                                      torch.where(self.is_grasp.unsqueeze(-1),
@@ -388,7 +395,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         #                                                           sub_goal_pos_tcp)))
 
         current_goal_info_t = torch.where(self.is_place.unsqueeze(-1),
-                                          final_goal_pos_tcp,
+                                          place_pos_obj,
                                           torch.where(self.is_lift.unsqueeze(-1),
                                                       place_pos_obj,
                                                       torch.where(self.is_grasp.unsqueeze(-1),
@@ -736,9 +743,12 @@ class FrankaGraspEnv(FrankaBaseEnv):
 
             self.still_lift[env_ids] = (self.is_place[env_ids]) & (self.object_pos_b[env_ids, 2] > self.object_place_pos_b[env_ids, 2] * 2)
 
-            self.is_success[env_ids] = torch.logical_and(self.is_place[env_ids], 
-                                                torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
-                                                                self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
+
+            # self.is_success[env_ids] = torch.logical_and(self.is_place[env_ids], 
+            #                                     torch.logical_and(self.retract_error[env_ids, 0] < self.cfg.retract_loc_th,
+            #                                                     self.retract_error[env_ids, 1] < self.cfg.retract_rot_th))
+            gripper_state = torch.stack([self.robot_joint_pos[:, self.left_finger_joint_idx], self.robot_joint_pos[:, self.right_finger_joint_idx]], dim=-1).mean(dim=-1)
+            self.is_success[env_ids] = (self.is_place[env_ids]) & (gripper_state[env_ids] > 0.99 * 0.04)
             
             self.is_success_put[env_ids] = self.is_success & ~self.still_lift
     
