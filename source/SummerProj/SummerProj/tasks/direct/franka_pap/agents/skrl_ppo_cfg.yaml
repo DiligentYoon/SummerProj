@@ -6,7 +6,7 @@ models:
   policy:  # see gaussian_model parameters
     _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaGaussianPolicy
     # FrankaGaussianPolicy의 __init__에 전달할 파라미터들
-    encoder_features: [256, 128]
+    encoder_features: [512, 128]
     policy_features: [64]
     clip_actions: False
     clip_log_std: True
@@ -16,7 +16,7 @@ models:
   value:  # see deterministic_model parameters
     _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaValue
     # FrankaValue의 __init__에 전달할 파라미터들
-    encoder_features: [256, 128]
+    encoder_features: [512, 128]
     value_features: [64]
     clip_actions: False
 
