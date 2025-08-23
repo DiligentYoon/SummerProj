@@ -116,10 +116,10 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
 
     # w_grasp = 1.5
     # w_lift = 4.5
-    w_grasp = 6.0
-    w_lift = 6.0
-    w_place = 6.0
-    w_success = 4000.0
+    w_grasp = 2.0
+    w_lift = 2.0
+    w_place = 2.0
+    w_success = 3000.0
 
     wx = 4.0
     wy = 4.0
@@ -127,9 +127,8 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
 
     w_penalty = 0.05
     w_gripper = 2.0
-    w_gripper_state = 5.0
     # w_ps = 2.0
-    w_ps = 1.0
+    w_ps = 0.5
 
     # curriculum learning
     place_loc_th_max = 5e-2

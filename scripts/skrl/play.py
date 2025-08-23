@@ -219,7 +219,7 @@ def main():
     prev_probe = None  # 이전 스텝의 probe (phase 판정t에 필요)
 
     # ---- 상수 인코딩 ----
-    APPR, GRASP, RETRACT, PLACE = 0, 1, 2, 3
+    APPR, GRASP, LIFT, PLACE, PUT, SUCCESS = 0, 1, 2, 3, 4, 5
 
     timestep = 0
     metric_path = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_metrics.xlsx"
@@ -228,6 +228,11 @@ def main():
     num_envs = env.num_envs  # 또는 env.num_envs
     ep_id    = np.zeros(num_envs, dtype=np.int64)
     step_in_ep = np.zeros(num_envs, dtype=np.int64)
+    cumulative_total_rewards = 0
+    cumulative_logic_rewards = 0
+    cumulative_potential_rewards = 0
+    cfg_task = env._unwrapped.cfg
+
     while simulation_app.is_running():
         start_time = time.time()
 
@@ -243,6 +248,7 @@ def main():
             # 3) 환경 전개 → s_{t+1}, r_t, d_t, info_{t+1}
             obs_next, reward, terminated, truncated, info = env.step(actions)
             done = terminated | truncated
+            cumulative_total_rewards += reward.item()
 
             # 4) V(s_{t+1})
             V_tp1, _, _ = runner.agent.value.act({"states": runner.agent._state_preprocessor(obs_next)}, role="value")
@@ -254,6 +260,8 @@ def main():
 
             # 6) 정보 가져오기
             probe_tp1 = copy.deepcopy(info["probe"])
+            log_tp1 = copy.deepcopy(info["log"])
+            log_robot = copy.deepcopy(info["robot"])
             assert probe_tp1 is not None, "env.extras['probe']가 info로 전달되도록 env를 보강하세요."
             robot_info = info["robot"]
             assert robot_info is not None, "env.extras['robot']가 info로 전달되도록 env를 보강하세요."
@@ -264,13 +272,17 @@ def main():
             def encode_phase(p) ->torch.Tensor:
                 # 텐서 bool -> long
                 is_g = p["is_grasp"].long()
-                is_r = p["is_lift"].long()
+                is_l = p["is_lift"].long()
+                is_p = p["is_place"].long()
+                is_o = p["is_put"].long()
                 is_s = p["is_success"].long()
                 # 우선순위: success>lift>grasp>approach
-                return torch.where(is_s==1, torch.full_like(is_g, 3),
-                    torch.where(is_r==1, torch.full_like(is_g, 2),
-                    torch.where(is_g==1, torch.full_like(is_g, 1),
-                                torch.zeros_like(is_g))))
+                return  torch.where(is_s==1, torch.full_like(is_g, 5),
+                        torch.where(is_o==1, torch.full_like(is_g, 4),
+                        torch.where(is_p==1, torch.full_like(is_g, 3),
+                        torch.where(is_l==1, torch.full_like(is_g, 2),
+                        torch.where(is_g==1, torch.full_like(is_g, 1),
+                                    torch.zeros_like(is_g))))))
 
             # t시점 phase는 이전 스텝의 probe로부터
             if prev_probe is None:
@@ -294,19 +306,55 @@ def main():
             near_place   = (probe_t["place_loc"]    <= eps_d_place*2)    & (probe_t["place_rot"]    <= eps_a_place*2)
 
             # 8) 전이/잔류 마스크 (방향별로 분해)
-            to_grasp      = (phase_t == APPR)    & (phase_tp1 == GRASP)      # APPR -> GRASP (정방향)
-            back_from_g   = (phase_t == GRASP)   & (phase_tp1 == APPR)       # GRASP -> APPR (역방향)
-            stay_appr     = (phase_t == APPR)    & (phase_tp1 == APPR)
+            to_grasp      = (phase_t == APPR)   & (phase_tp1 == GRASP)      # APPR -> GRASP (정방향)
+            stay_appr     = (phase_t == APPR)   & (phase_tp1 == APPR)
 
-            to_lift    = (phase_t == GRASP)   & (phase_tp1 == RETRACT)    # GRASP -> RETRACT (정방향)
-            back_from_r   = (phase_t == RETRACT) & (phase_tp1 == GRASP)      # RETRACT -> GRASP (역방향)
-            stay_grasp    = (phase_t == GRASP)   & (phase_tp1 == GRASP)
+            to_lift    = (phase_t == GRASP)     & (phase_tp1 == LIFT)    # GRASP -> LIFT (정방향)
+            stay_grasp    = (phase_t == GRASP)  & (phase_tp1 == GRASP)
 
-            to_place      = (phase_t == RETRACT) & (phase_tp1 == PLACE)      # RETRACT -> PLACE (정방향)
-            back_from_p   = (phase_t == PLACE)   & (phase_tp1 == RETRACT)    # PLACE -> RETRACT (역방향)
-            stay_lift  = (phase_t == RETRACT) & (phase_tp1 == RETRACT)
+            to_place      = (phase_t == LIFT)   & (phase_tp1 == PLACE)      # LIFT -> PLACE (정방향)
+            stay_lift  = (phase_t == LIFT)      & (phase_tp1 == LIFT)
 
-            print(f"Phase : {phase_tp1}")
+            to_put =(phase_t == PLACE) & (phase_tp1 == PUT)
+            stay_place = (phase_t == PLACE) & (phase_tp1 == PLACE)
+
+            to_success =(phase_t == PUT) & (phase_tp1 == SUCCESS)
+            stay_put = (phase_t == PUT) & (phase_tp1 == PUT)
+
+            transition = phase_t != phase_tp1
+
+
+            cumulative_logic_rewards += (cfg_task.w_grasp * (to_grasp | stay_grasp).float().item() + 
+                                         cfg_task.w_lift * (to_lift | stay_lift).float().item() + 
+                                         cfg_task.w_place * (to_place | stay_place).float().item() +
+                                         cfg_task.w_place * (to_put | stay_put).float().item() + 
+                                         cfg_task.w_success * to_success.float().item() -
+                                         cfg_task.w_penalty * torch.norm(actions[:, 7:14], dim=-1).item() -  
+                                         cfg_task.w_ps)
+
+            if to_grasp | stay_appr:
+                cumulative_potential_rewards += (cfg_task.w_pos * log_tp1["Approach_loc"] + cfg_task.w_rot * log_tp1["Approach_rot"]).item()
+            elif to_lift | stay_grasp:
+                cumulative_potential_rewards += (cfg_task.w_loc_lift * log_tp1["Lift_loc"] + cfg_task.w_rot_lift * log_tp1["Lift_rot"]).item()
+            elif to_place | stay_lift:
+                cumulative_potential_rewards += (cfg_task.w_loc_place * log_tp1["Place_loc"] + cfg_task.w_rot_place * log_tp1["Place_rot"]).item()
+            elif to_put | stay_place:
+                cumulative_potential_rewards += (cfg_task.w_gripper * log_tp1["Gripper_commands"] - log_robot["hand_vel"]).item()
+            elif to_success | stay_put:
+                cumulative_potential_rewards += (cfg_task.w_loc_retract * log_tp1["Retract_loc"] + cfg_task.w_rot_retract * log_tp1["Retract_rot"]).item()
+                cumulative_potential_rewards += (cfg_task.w_gripper * log_tp1["Gripper_commands"]).item()
+
+            if transition:
+                print(f"====================== [INFO : Phase Change] ============================")
+                print(f"Prev Phase : {phase_t.item()}")
+                print(f"Phase : {phase_tp1.item()}")
+                print(f"Cumulative Potential Rewards : {cumulative_potential_rewards :.2f}")
+                print(f"Cumulative Logic Rewards : {cumulative_logic_rewards :.2f}")
+                print(f"Cumulative Reward : {cumulative_total_rewards :.2f}")
+                
+                cumulative_total_rewards = 0
+                cumulative_logic_rewards = 0
+                cumulative_potential_rewards = 0
 
             # 9) 경계별로 ΔA 집계
             # Grasp 경계: APPR 근처에서 APPR에 머무름 vs GRASP로 전이
@@ -329,7 +377,7 @@ def main():
                 A_S_sum_r += A_t[mask_S_r].sum().item()
                 A_S_cnt_r += mask_S_r.sum().item()
 
-            # Place 경계: RETRACT 근처에서 RETRACT에 머무름 vs PLACE로 전이
+            # Place 경계: LIFT 근처에서 RETRACT에 머무름 vs PLACE로 전이
             mask_T_p = near_place & to_place
             mask_S_p = near_place & stay_lift
             if mask_T_p.any():
@@ -373,19 +421,19 @@ def main():
             obs = obs_next
 
         # 주기적으로 화면에 ΔA 출력
-        timestep += 1
-        if timestep % 50 == 0:
-            A_T_mean_g = A_T_sum_g / max(1, A_T_cnt_g)
-            A_S_mean_g = A_S_sum_g / max(1, A_S_cnt_g)
-            print(f"[Grasp boundary] E[A|transition]={A_T_mean_g:.4f}  E[A|stay]={A_S_mean_g:.4f}  Δ={A_T_mean_g - A_S_mean_g:.4f}")
+        # timestep += 1
+        # if timestep % 50 == 0:
+        #     A_T_mean_g = A_T_sum_g / max(1, A_T_cnt_g)
+        #     A_S_mean_g = A_S_sum_g / max(1, A_S_cnt_g)
+        #     print(f"[Grasp boundary] E[A|transition]={A_T_mean_g:.4f}  E[A|stay]={A_S_mean_g:.4f}  Δ={A_T_mean_g - A_S_mean_g:.4f}")
 
-            A_T_mean_r = A_T_sum_r / max(1, A_T_cnt_r)
-            A_S_mean_r = A_S_sum_r / max(1, A_S_cnt_r)
-            print(f"[Retract boundary] E[A|transition]={A_T_mean_r:.4f}  E[A|stay]={A_S_mean_r:.4f}  Δ={A_T_mean_r - A_S_mean_r:.4f}")
+        #     A_T_mean_r = A_T_sum_r / max(1, A_T_cnt_r)
+        #     A_S_mean_r = A_S_sum_r / max(1, A_S_cnt_r)
+        #     print(f"[Retract boundary] E[A|transition]={A_T_mean_r:.4f}  E[A|stay]={A_S_mean_r:.4f}  Δ={A_T_mean_r - A_S_mean_r:.4f}")
 
-            A_T_mean_p = A_T_sum_p / max(1, A_T_cnt_p)
-            A_S_mean_p = A_S_sum_p / max(1, A_S_cnt_p)
-            print(f"[Place boundary] E[A|transition]={A_T_mean_p:.4f}  E[A|stay]={A_S_mean_p:.4f}  Δ={A_T_mean_p - A_S_mean_p:.4f}")
+        #     A_T_mean_p = A_T_sum_p / max(1, A_T_cnt_p)
+        #     A_S_mean_p = A_S_sum_p / max(1, A_S_cnt_p)
+        #     print(f"[Place boundary] E[A|transition]={A_T_mean_p:.4f}  E[A|stay]={A_S_mean_p:.4f}  Δ={A_T_mean_p - A_S_mean_p:.4f}")
 
 
         # 비디오/리얼타임 처리

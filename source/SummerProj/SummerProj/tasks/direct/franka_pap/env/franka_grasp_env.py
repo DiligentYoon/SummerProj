@@ -330,7 +330,6 @@ class FrankaGraspEnv(FrankaBaseEnv):
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
                         self.cfg.w_place * r_put + 
-                        # self.cfg.w_success * 0.5 * r_first_place + 
                         self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
@@ -650,9 +649,10 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_weighted_retract_error[env_ids, 1] = self.prev_place_error[env_ids, 1]
 
 
-            self.prev_place[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
-            self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_lift[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
+            self.prev_grasp[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
+            self.prev_place[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
+            self.prev_put[env_ids] = torch.zeros_like(self.is_reach[env_ids], dtype=torch.bool, device=self.device)
             self.prev_imp_commands[env_ids] = torch.zeros_like(self.imp_commands[env_ids], device=self.device)
         else:
             self.prev_weighted_retract_error[env_ids] = self.weighted_retract_error[env_ids]
@@ -665,6 +665,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.prev_lift[env_ids] = self.is_lift[env_ids].clone()
             self.prev_grasp[env_ids] = self.is_grasp[env_ids].clone()
             self.prev_place[env_ids] = self.is_place[env_ids].clone()
+            self.prev_put[env_ids] = self.is_put[env_ids].clone()
+            
 
 
         # ========= Position Error 업데이트 =========
@@ -719,9 +721,9 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
 
         retract_error_xyz = torch.abs(self.robot_grasp_pos_b[env_ids, :3] - self.final_goal_pos_b[env_ids, :3])
-        self.weighted_retract_error[env_ids, 0] = torch.sqrt(torch.square(retract_error_xyz[:, 0]) +
-                                                             torch.square(retract_error_xyz[:, 1]) + 
-                                                             torch.square(retract_error_xyz[:, 2])).squeeze(-1)
+        self.weighted_retract_error[env_ids, 0] = torch.sqrt(0.25 * torch.square(retract_error_xyz[:, 0]) +
+                                                             0.25 * torch.square(retract_error_xyz[:, 1]) + 
+                                                             4 * torch.square(retract_error_xyz[:, 2])).squeeze(-1)
 
         self.weighted_retract_error[env_ids, 1] = self.retract_error[env_ids, 1]
 
@@ -765,7 +767,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         self.is_grasp[env_ids] = (self.is_grasp[env_ids]) | (self.is_in_place[env_ids]) | (self.is_place[env_ids])
 
         gripper_state = torch.stack([self.robot_joint_pos[:, self.left_finger_joint_idx], self.robot_joint_pos[:, self.right_finger_joint_idx]], dim=-1).mean(dim=-1)
-        self.is_put[env_ids] = (self.is_place[env_ids]) & (gripper_state[env_ids] > 0.99 * 0.04)
+        # self.is_put[env_ids] = ((self.is_place[env_ids]) & (gripper_state[env_ids] > 0.99 * 0.04)) | self.prev_put[env_ids]
+        self.is_put[env_ids] = ((self.is_place[env_ids]) & (gripper_state[env_ids] > 0.99 * 0.04))
 
 
     def update_end_condition(self, env_ids, reset):
@@ -792,6 +795,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
             self.contact[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             self.drop[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             self.collision[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+            self.re_pick[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             self.still_lift[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             self.is_success[env_ids] = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
             
@@ -871,8 +875,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 "Lift_rot": torch.mean(self.r_lift_rot),
                 "Place_loc": torch.mean(self.r_place_loc),
                 "Place_rot": torch.mean(self.r_place_rot),
-                "Retract_loc": torch.mean(self.r_retract_loc[self.is_place])  if self.is_place.any() else 0,
-                "Retract_rot": torch.mean(self.r_retract_rot[self.is_place])  if self.is_place.any() else 0,
+                "Retract_loc": torch.mean(self.r_retract_loc[self.is_put])  if self.is_put.any() else 0,
+                "Retract_rot": torch.mean(self.r_retract_rot[self.is_put])  if self.is_put.any() else 0,
                 "Gripper_commands": torch.mean(self.r_gripper[self.is_place]) if self.is_place.any() else 0,
                 
             }
@@ -887,7 +891,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 # robot info
                 "joint_pos": self.robot_joint_pos.detach(),
                 "joint_vel" : self.robot_joint_vel.detach(),
-                "hand_vel" : self._robot.data.body_lin_vel_w[:, self.hand_link_idx, :].detach(),
+                "hand_vel" : self.robot_hand_lin_vel.detach(),
                 # reward Info
                 "total_reward": torch.mean(self.r_total).unsqueeze(-1).detach()
 
@@ -902,6 +906,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
                     "is_reach":   self.is_reach.detach(),
                     "is_grasp":   self.is_grasp.detach(),
                     "is_lift": self.is_lift.detach(),
+                    "is_place": self.is_place.detach(),
+                    "is_put": self.is_put.detach(),
                     "is_success": self.is_success.detach(),
                     # errors
                     "approach_loc": self.approach_error[:, 0].detach(),
