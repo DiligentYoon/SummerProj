@@ -150,6 +150,10 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     loc_res_scale = 0.1 
     rot_res_scale = 0.1
     joint_res_clipping = 0.2
+    k_stiffness = 2.0
+    k_damping = 2.0
+    stiffness_range = imp_controller.stiffness_limits
+    damping_range = imp_controller.damping_ratio_limits
     stiffness_scale = imp_controller.stiffness_limits[1]
     damping_scale = imp_controller.damping_ratio_limits[1]
     gripper_scale = 0.04
