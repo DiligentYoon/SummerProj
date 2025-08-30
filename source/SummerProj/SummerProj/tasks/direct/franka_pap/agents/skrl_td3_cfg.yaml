@@ -1,0 +1,78 @@
+seed: 42
+# Models are instantiated using skrl's model instantiator utility
+# https://skrl.readthedocs.io/en/latest/api/utils/model_instantiators.html
+models:
+  separate: True
+  policy:
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaDeterministicPolicy
+  target_policy:  
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaDeterministicPolicy
+  critic_1: 
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+  critic_2: 
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+  target_critic_1: 
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+  target_critic_2: 
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+
+
+# Rollout memory
+# https://skrl.readthedocs.io/en/latest/api/memories/random.html
+memory:
+  class: RandomMemory
+  memory_size: 1000000
+
+agent:
+  class: TD3
+  gradient_steps: 1        
+  batch_size: 64
+
+  discount_factor: 0.99
+  polyak: 0.005
+
+  actor_learning_rate: 6.0e-04
+  critic_learning_rate: 6.0e-04
+  # learning rate: 1.0e-04
+  learning_rate_scheduler: KLAdaptiveLR
+  learning_rate_scheduler_kwargs:
+    kl_threshold: 0.004
+    # kl_threshold: 0.004
+  state_preprocessor: RunningStandardScaler
+  state_preprocessor_kwargs: null
+  value_preprocessor: RunningStandardScaler
+  value_preprocessor_kwargs: null
+
+  exploration: 
+    noise: OrnsteinUhlenbeckNoise        
+    initial_scale: 1.0      
+    final_scale: 1e-3      
+    timesteps: 24000      
+
+  random_timesteps: 0
+  learning_starts: 1000
+
+  grad_norm_clip: 1.0
+  ratio_clip: 0.2
+  value_clip: 0.2
+
+  policy_delay: 2                     
+  smooth_regularization_noise: None    
+  smooth_regularization_clip: 0.5    
+
+  rewards_shaper: None        
+  mixed_precision: False   
+
+  # logging and checkpoint
+  experiment:
+    directory: "franka_approach"
+    experiment_name: ""
+    write_interval: auto
+    checkpoint_interval: auto
+
+# Sequential trainer
+# https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
+trainer:
+  class: SequentialTrainer
+  timesteps: 36000
+  environment_info: log

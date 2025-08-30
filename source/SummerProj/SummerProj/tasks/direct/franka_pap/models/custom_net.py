@@ -8,7 +8,7 @@ from skrl.models.torch import Model, GaussianMixin, DeterministicMixin
 # --- 정책함수 클래스 ---
 class FrankaGaussianPolicy(GaussianMixin, Model):
     def __init__(self, observation_space, action_space, device,
-                 encoder_features: List[int] = [256, 128],
+                 encoder_features: List[int] = [512, 128],
                  policy_features: List[int] = [64],
                  clip_actions: bool = False,
                  clip_log_std: bool = True,
@@ -50,11 +50,49 @@ class FrankaGaussianPolicy(GaussianMixin, Model):
         mean_actions = self.mean_head(p)
         
         return mean_actions, self.log_std_parameter, {}
+    
+
+class FrankaDeterminiticPolicy(DeterministicMixin, Model):
+    def __init__(self, observation_space, action_space, device,
+                 encoder_features: List[int] = [512, 128],
+                 action_features: List[int] = [64],
+                 clip_actions: bool = False):
+        
+        DeterministicMixin.__init__(self, clip_actions, device)
+        Model.__init__(self, observation_space, action_space, device)
+
+        # Backbone
+        in_features_encoder = observation_space.shape[0]
+        encoder_layers = []
+        for out_features in encoder_features:
+            encoder_layers.append(nn.Linear(in_features_encoder, out_features))
+            encoder_layers.append(nn.ReLU())
+            in_features_encoder = out_features
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        # Action Head
+        in_features_value = encoder_features[-1]
+        action_layers = []
+        for out_features in action_features:
+            action_layers.append(nn.Linear(in_features_value, out_features))
+            action_layers.append(nn.ReLU())
+            in_features_value = out_features
+        self.action_branch = nn.Sequential(*action_layers)
+        self.action_head = nn.Linear(in_features_value, self.num_actions)
+
+    
+    def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
+        obs = inputs["states"]
+        x = self.encoder(obs)
+        a = self.action_branch(x)
+        actions = torch.tanh(self.action_head(a))
+        return actions, {}
+
 
 # --- 가치함수 클래스 ---
 class FrankaValue(DeterministicMixin, Model):
     def __init__(self, observation_space, action_space, device,
-                 encoder_features: List[int] = [256, 128],
+                 encoder_features: List[int] = [512, 128],
                  value_features: List[int] = [64],
                  clip_actions: bool = False):
         
@@ -63,6 +101,43 @@ class FrankaValue(DeterministicMixin, Model):
         
         # Backbone
         in_features_encoder = observation_space.shape[0]
+        encoder_layers = []
+        for out_features in encoder_features:
+            encoder_layers.append(nn.Linear(in_features_encoder, out_features))
+            encoder_layers.append(nn.ReLU())
+            in_features_encoder = out_features
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        # Value Head
+        in_features_value = encoder_features[-1]
+        value_layers = []
+        for out_features in value_features:
+            value_layers.append(nn.Linear(in_features_value, out_features))
+            value_layers.append(nn.ReLU())
+            in_features_value = out_features
+        self.value_branch = nn.Sequential(*value_layers)
+        self.value_head = nn.Linear(in_features_value, 1)
+
+    def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
+        obs = inputs["states"]
+        x = self.encoder(obs)
+        v = self.value_branch(x)
+        return self.value_head(v), {}
+
+
+
+# --- 가치함수 클래스 ---
+class FrankaActionValue(DeterministicMixin, Model):
+    def __init__(self, observation_space, action_space, device,
+                 encoder_features: List[int] = [512, 128],
+                 value_features: List[int] = [64],
+                 clip_actions: bool = False):
+        
+        DeterministicMixin.__init__(self, clip_actions, device)
+        Model.__init__(self, observation_space, action_space, device)
+        
+        # Backbone
+        in_features_encoder = self.num_actions + self.num_observations
         encoder_layers = []
         for out_features in encoder_features:
             encoder_layers.append(nn.Linear(in_features_encoder, out_features))
