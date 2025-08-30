@@ -52,7 +52,7 @@ class FrankaGaussianPolicy(GaussianMixin, Model):
         return mean_actions, self.log_std_parameter, {}
     
 
-class FrankaDeterminiticPolicy(DeterministicMixin, Model):
+class FrankaDeterministicPolicy(DeterministicMixin, Model):
     def __init__(self, observation_space, action_space, device,
                  encoder_features: List[int] = [512, 128],
                  action_features: List[int] = [64],
@@ -157,6 +157,7 @@ class FrankaActionValue(DeterministicMixin, Model):
 
     def compute(self, inputs: dict, role: str = "") -> tuple[torch.Tensor, ...]:
         obs = inputs["states"]
-        x = self.encoder(obs)
+        action = inputs["taken_actions"]
+        x = self.encoder(torch.cat([obs, action], dim=-1))
         v = self.value_branch(x)
         return self.value_head(v), {}

@@ -8,13 +8,13 @@ models:
   target_policy:  
     _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaDeterministicPolicy
   critic_1: 
-    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaActionValue
   critic_2: 
-    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaActionValue
   target_critic_1: 
-    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaActionValue
   target_critic_2: 
-    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankActionaValue
+    _target_: SummerProj.tasks.direct.franka_pap.models.custom_net.FrankaActionValue
 
 
 # Rollout memory
@@ -44,7 +44,10 @@ agent:
   value_preprocessor_kwargs: null
 
   exploration: 
-    noise: OrnsteinUhlenbeckNoise        
+    noise: GaussianNoise
+    noise_kwargs:
+      mean: 0.0
+      std: 0.2       
     initial_scale: 1.0      
     final_scale: 1e-3      
     timesteps: 24000      
