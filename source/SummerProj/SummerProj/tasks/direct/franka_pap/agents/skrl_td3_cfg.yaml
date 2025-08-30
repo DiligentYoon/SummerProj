@@ -21,7 +21,7 @@ models:
 # https://skrl.readthedocs.io/en/latest/api/memories/random.html
 memory:
   class: RandomMemory
-  memory_size: 1000000
+  memory_size: 500000
 
 agent:
   class: TD3
