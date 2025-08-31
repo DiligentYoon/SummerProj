@@ -21,18 +21,18 @@ models:
 # https://skrl.readthedocs.io/en/latest/api/memories/random.html
 memory:
   class: RandomMemory
-  memory_size: 500000
+  memory_size: 1000
 
 agent:
   class: TD3
   gradient_steps: 1        
-  batch_size: 64
+  batch_size: 256
 
   discount_factor: 0.99
   polyak: 0.005
 
-  actor_learning_rate: 6.0e-04
-  critic_learning_rate: 6.0e-04
+  actor_learning_rate: 5.0e-04
+  critic_learning_rate: 5.0e-04
   # learning rate: 1.0e-04
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
@@ -49,7 +49,7 @@ agent:
       mean: 0.0
       std: 0.2       
     initial_scale: 1.0      
-    final_scale: 1e-3      
+    final_scale: 0.001      
     timesteps: 24000      
 
   random_timesteps: 0
@@ -60,7 +60,10 @@ agent:
   value_clip: 0.2
 
   policy_delay: 2                     
-  smooth_regularization_noise: None    
+  smooth_regularization_noise: GaussianNoise
+  smooth_regularization_noise_kwargs:
+    mean: 0.0
+    std: 0.2
   smooth_regularization_clip: 0.5    
 
   rewards_shaper: None        

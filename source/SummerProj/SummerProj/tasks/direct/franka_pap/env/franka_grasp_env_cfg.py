@@ -98,37 +98,37 @@ class FrankaGraspEnvCfg(FrankaBaseEnvCfg):
     alpha_place, beta_place = 0.5, 0.5
     alpha_retract, beta_retract = 0.25, 0.25
 
-    w_pos = 20.0
-    w_rot = 10.0
+    w_pos = 2.0
+    w_rot = 1.0
 
     # w_loc_lift = 45.0
     # w_rot_lift = 10.0
-    w_loc_lift = 20.0
-    w_rot_lift = 10.0
+    w_loc_lift = 2.0
+    w_rot_lift = 1.0
 
     # w_loc_place = 50.0
     # w_rot_place = 25.0
-    w_loc_place = 20.0
-    w_rot_place = 10.0
+    w_loc_place = 2.0
+    w_rot_place = 1.0
 
-    w_loc_retract = 20.0
-    w_rot_retract = 10.0
+    w_loc_retract = 2.0
+    w_rot_retract = 1.0
 
     # w_grasp = 1.5
     # w_lift = 4.5
-    w_grasp = 3.0
-    w_lift = 3.0
-    w_place = 3.0
-    w_success = 3000.0
+    w_grasp = 0.3
+    w_lift = 0.3
+    w_place = 0.3
+    w_success = 300.0
 
     wx = 4.0
     wy = 4.0
     wz = 1.0
 
-    w_penalty = 0.05
-    w_gripper = 1.5
+    w_penalty = 0.01
+    w_gripper = 0.15
     # w_ps = 2.0
-    w_ps = 0.5
+    w_ps = 0.1
 
     # curriculum learning
     place_loc_th_max = 5e-2
