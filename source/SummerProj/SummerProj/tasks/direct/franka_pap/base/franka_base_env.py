@@ -44,6 +44,8 @@ class FrankaBaseEnv(DirectRLEnv):
         self.robot_dof_res_upper_limits = torch.tensor(self.cfg.joint_res_clipping, device=self.device)
         self.robot_dof_lower_limits = self._robot.data.soft_joint_pos_limits[0, :, 0].to(device=self.device)
         self.robot_dof_upper_limits = self._robot.data.soft_joint_pos_limits[0, :, 1].to(device=self.device)
+        self.robot_dof_vel_lower_limits = torch.tensor()
+        self.robot_dof_vel_upper_limits = torch.tensor()
         self.robot_dof_stiffness_lower_limits = torch.tensor(self.cfg.imp_controller.stiffness_limits[0], device=self.device)
         self.robot_dof_stiffness_upper_limits = torch.tensor(self.cfg.imp_controller.stiffness_limits[1], device=self.device)
         self.robot_dof_damping_lower_limits = torch.tensor(self.cfg.imp_controller.damping_ratio_limits[0], device=self.device)

@@ -133,7 +133,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     # Joint Impedance controller
     imp_controller: JointImpedanceControllerCfg = JointImpedanceControllerCfg(
         command_type="p_abs",
-        impedance_mode="variable",
+        impedance_mode="fixed",
         stiffness=300.0,
         damping_ratio=0.5,
         stiffness_limits=(30, 300),
@@ -150,6 +150,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     loc_res_scale = 0.1 
     rot_res_scale = 0.1
     joint_res_clipping = 0.2
+    joint_vel_clipping = 0.2
     k_stiffness = 2.0
     k_damping = 2.0
     stiffness_range = imp_controller.stiffness_limits
