@@ -143,10 +143,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         
 
         norm_stiffness_action = (self.actions[:, 7:14] + 1.0) * 0.5
-        # 지수(k)를 적용하여 낮은 값에 대한 정밀도 향상
-        exp_stiffness_action = torch.pow(norm_stiffness_action, self.cfg.k_stiffness)
         # 최종 stiffness 범위로 매핑
-        stiffness_val = self.cfg.stiffness_range[0] + (self.cfg.stiffness_range[1] - self.cfg.stiffness_range[0]) * exp_stiffness_action
+        stiffness_val = self.cfg.stiffness_range[0] + (self.cfg.stiffness_range[1] - self.cfg.stiffness_range[0]) * norm_stiffness_action
         
         self.processed_actions[:, 7:14] = torch.clamp(stiffness_val,
                                                       self.robot_dof_stiffness_lower_limits,
@@ -155,10 +153,8 @@ class FrankaGraspEnv(FrankaBaseEnv):
         # 2. Damping 처리
         # action 값을 [0, 1] 범위로 정규화
         norm_damping_action = (self.actions[:, 14:21] + 1.0) * 0.5
-        # 지수(k)를 적용하여 낮은 값에 대한 정밀도 향상
-        exp_damping_action = torch.pow(norm_damping_action, self.cfg.k_damping)
         # 최종 damping 범위로 매핑
-        damping_val = self.cfg.damping_range[0] + (self.cfg.damping_range[1] - self.cfg.damping_range[0]) * exp_damping_action
+        damping_val = self.cfg.damping_range[0] + (self.cfg.damping_range[1] - self.cfg.damping_range[0]) * norm_damping_action
 
         self.processed_actions[:, 14:21] = torch.clamp(damping_val,
                                                        self.robot_dof_damping_lower_limits,
