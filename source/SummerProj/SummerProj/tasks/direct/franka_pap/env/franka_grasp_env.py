@@ -341,7 +341,7 @@ class FrankaGraspEnv(FrankaBaseEnv):
         logic_reward = (self.cfg.w_grasp * r_grasp + 
                         self.cfg.w_lift * r_lift + 
                         self.cfg.w_place * r_place +
-                        self.cfg.w_place * 0.5 * r_put + 
+                        self.cfg.w_place * r_put + 
                         self.cfg.w_success * r_success -
                         self.cfg.w_penalty * kp_norm -  
                         self.cfg.w_ps)
@@ -786,34 +786,34 @@ class FrankaGraspEnv(FrankaBaseEnv):
                 self.still_lift.index_select(0, done_ids).float().detach().cpu().tolist()
             )
 
-            if self.logging_count % self.cfg.logging_interval == 0:
-                print("============================== [INFO] ================================")
-                print(
-                        f"[Phase INFO] : Reach / Grasp / Lift / Place / Put: "
-                        f"{self.is_reach.sum().item()}/"
-                        f"{self.is_grasp.sum().item()}/"
-                        f"{self.is_lift.sum().item()}/"
-                        f"{self.is_place.sum().item()}/"
-                        f"{self.is_put.sum().item()}"
-                    )
-                print(
-                        f"[End INFO] : Contact / Drop / Collision / Still Lift / Success : "
-                        f"{self.contact.sum().item()}/"
-                        f"{self.drop.sum().item()}/"
-                        f"{self.collision.sum().item()}/"
-                        f"{self.still_lift.sum().item()}/"
-                        f"{self.is_success.sum().item()}"
-                    )
-                
-                print(
-                        f"[Additional Physics INFO] : MGAS / MHV : "
-                        f"{torch.mean(self.r_gripper[self.is_place]).item() if self.is_place.any() else 0 :.3f}/"
-                        f"{torch.mean(self.robot_hand_lin_vel[self.is_put]).item() if self.is_put.any() else 0 :.3f}"
-                    )         
+        if self.logging_count % self.cfg.logging_interval == 0:
+            print("============================== [INFO] ================================")
+            print(
+                    f"[Phase INFO] : Reach / Grasp / Lift / Place / Put: "
+                    f"{self.is_reach.sum().item()}/"
+                    f"{self.is_grasp.sum().item()}/"
+                    f"{self.is_lift.sum().item()}/"
+                    f"{self.is_place.sum().item()}/"
+                    f"{self.is_put.sum().item()}"
+                )
+            print(
+                    f"[End INFO] : Contact / Drop / Collision / Still Lift / Success : "
+                    f"{self.contact.sum().item()}/"
+                    f"{self.drop.sum().item()}/"
+                    f"{self.collision.sum().item()}/"
+                    f"{self.still_lift.sum().item()}/"
+                    f"{self.is_success.sum().item()}"
+                )
+            
+            print(
+                    f"[Additional Physics INFO] : MGAS / MHV : "
+                    f"{torch.mean(self.r_gripper[self.is_put]).item() if self.is_put.any() else 0 :.3f}/"
+                    f"{torch.mean(self.robot_hand_lin_vel[self.is_put]).item() if self.is_put.any() else 0 :.3f}"
+                )         
 
-                self.logging_count = 0
+            self.logging_count = 0
  
-            self.logging_count += 1
+        self.logging_count += 1
 
 
 
