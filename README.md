@@ -57,5 +57,5 @@ pre-commit run --all-files
 
 ## Demo GIF
 <p align="center">
-<img src="post/Multi_Stage_RL.gif" width="480"/>
+<img src="post/Multi_Stage_RL.gif" width="720"/>
 </p>
