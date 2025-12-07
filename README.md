@@ -52,8 +52,13 @@ pre-commit run --all-files
 
 ## Poster
 <p align="center">
-<img src="post/Poster.png" alt="Poster" width="720">
+<img src="post/Poster.png" alt="Poster" width="480">
 </p>
-## Demo Vedio
 
-[▶ Watch the demo video](post/Multi_Stage_RL.mp4)
+## Demo GIF
+<p align="center">
+
+</p>
+
+## Demo Vedio
+[▶ Watch the demo video](post/Multi_Stage_RL.gif)

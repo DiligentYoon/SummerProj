@@ -14,6 +14,7 @@
 **/*.usdc
 **/*.usdz
 **/*.gif
+!post/Multi_Stage_RL.gif
 
 # Python
 .DS_Store
