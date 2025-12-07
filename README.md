@@ -50,12 +50,12 @@ pip install pre-commit
 pre-commit run --all-files
 ```
 
-## Poster
-<p align="center">
-<img src="post/Poster.png" alt="Poster" width="480">
-</p>
-
 ## Demo GIF
 <p align="center">
 <img src="post/Multi_Stage_RL.gif" width="720"/>
+</p>
+
+## Poster
+<p align="center">
+<img src="post/Poster.png" alt="Poster" width="720">
 </p>
